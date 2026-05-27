@@ -46,7 +46,7 @@ export interface VestingScheduleInfo {
 }
 
 export interface TransactionItem {
-  type: "mint" | "burn" | "transfer";
+  type: "mint" | "burn" | "clawback" | "transfer";
   from?: string;
   to?: string;
   amount: string;
@@ -241,11 +241,15 @@ export async function fetchApprovedSpendersFromEvents(params: {
 
   let cursor: string | undefined;
   for (let page = 0; page < maxPages; page++) {
-    const { events, nextCursor } = await fetchIndexedEvents(contractId, config, {
-      topics: [topicApprove],
-      limit: pageSize,
-      cursor,
-    });
+    const { events, nextCursor } = await fetchIndexedEvents(
+      contractId,
+      config,
+      {
+        topics: [topicApprove],
+        limit: pageSize,
+        cursor,
+      },
+    );
 
     if (events.length === 0) break;
 
@@ -316,6 +320,89 @@ export function decodeAddress(val: StellarSdk.xdr.ScVal): string {
 /**
  * Fetch full token metadata from a Soroban SEP-41 token contract.
  */
+/**
+ * Validate if a contract implements the SEP-41 token standard.
+ * This function attempts to call the required SEP-41 methods to verify
+ * that the contract is a valid token contract.
+ */
+export async function validateTokenContract(
+  contractId: string,
+  config: NetworkConfig,
+): Promise<{ isValid: boolean; error?: string }> {
+  try {
+    // Try to call the required SEP-41 methods
+    const [nameResult, symbolResult, decimalsResult] = await Promise.allSettled(
+      [
+        simulateCall(contractId, "name", config),
+        simulateCall(contractId, "symbol", config),
+        simulateCall(contractId, "decimals", config),
+      ],
+    );
+
+    // Check if all required methods are available
+    if (nameResult.status === "rejected") {
+      return {
+        isValid: false,
+        error: "Contract does not implement 'name()' method",
+      };
+    }
+
+    if (symbolResult.status === "rejected") {
+      return {
+        isValid: false,
+        error: "Contract does not implement 'symbol()' method",
+      };
+    }
+
+    if (decimalsResult.status === "rejected") {
+      return {
+        isValid: false,
+        error: "Contract does not implement 'decimals()' method",
+      };
+    }
+
+    // Try to decode the values to ensure they return the correct types
+    try {
+      decodeString(nameResult.value);
+      decodeString(symbolResult.value);
+      decodeU32(decimalsResult.value);
+    } catch {
+      return {
+        isValid: false,
+        error: "Contract methods return invalid data types",
+      };
+    }
+
+    // Optionally check for other common SEP-41 methods
+    const [balanceResult, totalSupplyResult] = await Promise.allSettled([
+      simulateCall(contractId, "balance", config, [
+        StellarSdk.Address.fromString(
+          "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+        ).toScVal(),
+      ]),
+      simulateCall(contractId, "total_supply", config),
+    ]);
+
+    if (
+      balanceResult.status === "rejected" &&
+      totalSupplyResult.status === "rejected"
+    ) {
+      return {
+        isValid: false,
+        error: "Contract does not implement required balance or supply methods",
+      };
+    }
+
+    return { isValid: true };
+  } catch (error) {
+    return {
+      isValid: false,
+      error:
+        error instanceof Error ? error.message : "Unknown validation error",
+    };
+  }
+}
+
 export async function fetchTokenInfo(
   contractId: string,
   config: NetworkConfig,
@@ -329,6 +416,12 @@ async function _fetchTokenInfo(
   contractId: string,
   config: NetworkConfig,
 ): Promise<TokenInfo> {
+  // First validate that this is a SEP-41 token contract
+  const validation = await validateTokenContract(contractId, config);
+  if (!validation.isValid) {
+    throw new Error(`Invalid token contract: ${validation.error}`);
+  }
+
   const [nameVal, symbolVal, decimalsVal, adminVal] = await Promise.all([
     simulateCall(contractId, "name", config),
     simulateCall(contractId, "symbol", config),
@@ -353,8 +446,8 @@ async function _fetchTokenInfo(
   try {
     const maxVal = await simulateCall(contractId, "max_supply", config);
     if (maxVal && maxVal.switch() !== StellarSdk.xdr.ScValType.scvVoid()) {
-       const rawMax = decodeI128(maxVal);
-       maxSupply = formatTokenAmount(rawMax, decimals);
+      const rawMax = decodeI128(maxVal);
+      maxSupply = formatTokenAmount(rawMax, decimals);
     }
   } catch {
     // max_supply not implemented or not accessible
@@ -413,14 +506,19 @@ export async function fetchTopHolders(
     const symbol =
       symbolHint ??
       decodeString(await simulateCall(contractId, "symbol", config));
-    const decimals =
-      decodeU32(await simulateCall(contractId, "decimals", config));
+    const decimals = decodeU32(
+      await simulateCall(contractId, "decimals", config),
+    );
 
     let issuer = issuerHint;
     if (!issuer) {
       // Resolve issuer for this asset code from Horizon stats.
       // If multiple issuers exist for same code, prefer one with largest supply.
-      const assetsPage = await horizon.assets().forCode(symbol).limit(200).call();
+      const assetsPage = await horizon
+        .assets()
+        .forCode(symbol)
+        .limit(200)
+        .call();
       if (assetsPage.records.length === 0) {
         return [];
       }
@@ -433,8 +531,7 @@ export async function fetchTopHolders(
         .sort(
           (a, b) =>
             parseFloat(getAssetAmount(b)) - parseFloat(getAssetAmount(a)),
-        )[0]
-        .asset_issuer;
+        )[0].asset_issuer;
     }
 
     const asset = new StellarSdk.Asset(symbol, issuer);
@@ -472,7 +569,9 @@ export async function fetchTopHolders(
         return { address: acc.account_id, rawBalance };
       })
       .filter((row) => row.rawBalance > BigInt(0))
-      .sort((a, b) => (a.rawBalance > b.rawBalance ? -1 : a.rawBalance < b.rawBalance ? 1 : 0));
+      .sort((a, b) =>
+        a.rawBalance > b.rawBalance ? -1 : a.rawBalance < b.rawBalance ? 1 : 0,
+      );
 
     return parsed.map(({ address, rawBalance }) => ({
       address,
@@ -553,9 +652,10 @@ export async function fetchTransactionHistory(
   const topicTransfer = encodeTopicSymbol("transfer");
   const topicMint = encodeTopicSymbol("mint");
   const topicBurn = encodeTopicSymbol("burn");
+  const topicClawback = encodeTopicSymbol("clawback");
 
   const { events, nextCursor } = await fetchIndexedEvents(contractId, config, {
-    topics: [topicTransfer, topicMint, topicBurn],
+    topics: [topicTransfer, topicMint, topicBurn, topicClawback],
     cursor,
     limit,
   });
@@ -567,7 +667,12 @@ export async function fetchTransactionHistory(
     if (!topic0) continue;
 
     const typePath = decodeString(topic0);
-    if (typePath !== "mint" && typePath !== "burn" && typePath !== "transfer") {
+    if (
+      typePath !== "mint" &&
+      typePath !== "burn" &&
+      typePath !== "clawback" &&
+      typePath !== "transfer"
+    ) {
       continue;
     }
 
@@ -586,7 +691,10 @@ export async function fetchTransactionHistory(
     if (typePath === "mint" && event.topic.length > 1) {
       const to = toScVal(event.topic[1]);
       if (to) item.to = decodeAddress(to);
-    } else if (typePath === "burn" && event.topic.length > 1) {
+    } else if (
+      (typePath === "burn" || typePath === "clawback") &&
+      event.topic.length > 1
+    ) {
       const from = toScVal(event.topic[1]);
       if (from) item.from = decodeAddress(from);
     } else if (typePath === "transfer" && event.topic.length > 2) {
@@ -605,7 +713,7 @@ export async function fetchTransactionHistory(
 export interface TokenActivityInfo {
   id: string;
   pagingToken: string;
-  type: "mint" | "transfer" | "burn" | "other";
+  type: "mint" | "transfer" | "burn" | "clawback" | "other";
   amount: string;
   from: string;
   to: string;
@@ -629,13 +737,15 @@ export async function fetchAccountOperations(
       const topicTransfer = encodeTopicSymbol("transfer");
       const topicMint = encodeTopicSymbol("mint");
       const topicBurn = encodeTopicSymbol("burn");
+      const topicClawback = encodeTopicSymbol("clawback");
       const pageSize = Math.min(limit, 200);
 
-      const { events, nextCursor: nextIndexerCursor } = await fetchIndexedEvents(accountId, config, {
-        topics: [topicTransfer, topicMint, topicBurn],
-        limit: pageSize,
-        cursor: cursor ?? undefined,
-      });
+      const { events, nextCursor: nextIndexerCursor } =
+        await fetchIndexedEvents(accountId, config, {
+          topics: [topicTransfer, topicMint, topicBurn, topicClawback],
+          limit: pageSize,
+          cursor: cursor ?? undefined,
+        });
 
       const records: TokenActivityInfo[] = [];
 
@@ -647,6 +757,7 @@ export async function fetchAccountOperations(
         if (
           typePath !== "mint" &&
           typePath !== "burn" &&
+          typePath !== "clawback" &&
           typePath !== "transfer"
         ) {
           continue;
@@ -662,7 +773,10 @@ export async function fetchAccountOperations(
         if (typePath === "mint" && event.topic.length > 1) {
           const toVal = toScVal(event.topic[1]);
           if (toVal) to = decodeAddress(toVal);
-        } else if (typePath === "burn" && event.topic.length > 1) {
+        } else if (
+          (typePath === "burn" || typePath === "clawback") &&
+          event.topic.length > 1
+        ) {
           const fromVal = toScVal(event.topic[1]);
           if (fromVal) from = decodeAddress(fromVal);
         } else if (typePath === "transfer" && event.topic.length > 2) {

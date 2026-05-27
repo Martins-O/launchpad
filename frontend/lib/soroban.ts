@@ -74,6 +74,7 @@ interface ToastBridge {
     message?: string;
     variant?: "info" | "success" | "warning" | "error";
     duration?: number;
+    txHash?: string;
   }) => string;
 }
 
@@ -183,7 +184,8 @@ function classifyByStatus(status: number, raw?: string): RpcErrorInfo {
       status,
       title: `RPC server error (${status})`,
       message:
-        raw ?? "The Soroban RPC server returned an error. Please retry shortly.",
+        raw ??
+        "The Soroban RPC server returned an error. Please retry shortly.",
     };
   }
   return {
@@ -201,6 +203,8 @@ export interface WrapRpcOptions {
   silent?: boolean;
   /** Override the toast title. */
   toastTitle?: string;
+  /** Transaction hash for linking in notification history. */
+  txHash?: string;
 }
 
 /**
@@ -227,6 +231,7 @@ export async function wrapRpcCall<T>(
           info.kind === "timeout" || info.kind === "network"
             ? "warning"
             : "error",
+        txHash: options.txHash,
       });
     }
 

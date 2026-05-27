@@ -114,6 +114,7 @@ export default function ActivityFeed({ accountId }: { accountId: string }) {
       case "mint":
         return <Droplets className="h-4 w-4 text-blue-400" />;
       case "burn":
+      case "clawback":
         return <Flame className="h-4 w-4 text-red-400" />;
       case "transfer":
         return <ArrowLeftRight className="h-4 w-4 text-green-400" />;
@@ -127,6 +128,7 @@ export default function ActivityFeed({ accountId }: { accountId: string }) {
       case "mint":
         return "text-blue-400 bg-blue-400/10 border-blue-400/20";
       case "burn":
+      case "clawback":
         return "text-red-400 bg-red-400/10 border-red-400/20";
       case "transfer":
         return "text-green-400 bg-green-400/10 border-green-400/20";

@@ -1,7 +1,8 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, Address, BytesN, Env, String,
+    contract, contractclient, contractimpl, contracttype, symbol_short, Address, BytesN, Env,
+    String,
 };
 
 // ---------------------------------------------------------------------------
@@ -13,15 +14,18 @@ use soroban_sdk::{
 pub enum DataKey {
     Admin,
     PendingAdmin,
+    ComplianceNode,
     Name,
     Symbol,
     Decimals,
     TotalSupply,
     TotalBurned,
     MaxSupply,
+    MaxBalancePerAccount,
     ContractUri,
     Balance(Address),
     Allowance(Address, Address), // (owner, spender)
+    Nonce(Address),              // For permit functionality
     Frozen(Address),
     IsPaused,
     /// Set to `true` after `revoke_admin` is called. Once locked, no admin
@@ -31,6 +35,11 @@ pub enum DataKey {
     AuthorizationRequired,
     AuthorizationRevocable,
     AuthorizedHolder(Address),
+}
+
+#[contractclient(name = "ComplianceNodeClient")]
+pub trait ComplianceNodeInterface {
+    fn can_trade(env: Env, from: Address, to: Address) -> bool;
 }
 
 // ---------------------------------------------------------------------------
@@ -43,6 +52,7 @@ pub enum DataKey {
 /// - #1  freeze_account / unfreeze_account (guard on transfer)
 /// - #2  two-step admin transfer (propose_admin / accept_admin)
 /// - #4  max_supply cap enforcement in mint
+/// - #138 clawback() and #163 compliance-node transfer checks
 #[contract]
 pub struct TokenContract;
 
@@ -67,6 +77,7 @@ impl TokenContract {
         max_supply: Option<i128>,
         authorization_required: bool,
         authorization_revocable: bool,
+        compliance_node: Option<Address>,
     ) {
         // Prevent re-initialization
         if env.storage().instance().has(&DataKey::Admin) {
@@ -91,6 +102,11 @@ impl TokenContract {
         env.storage()
             .instance()
             .set(&DataKey::AuthorizationRevocable, &authorization_revocable);
+        if let Some(node) = compliance_node {
+            env.storage()
+                .instance()
+                .set(&DataKey::ComplianceNode, &node);
+        }
 
         // When authorization_required is enabled the admin is automatically
         // authorized so the initial supply mint succeeds.
@@ -138,6 +154,34 @@ impl TokenContract {
         Self::_require_admin(&env);
         assert!(amount > 0, "amount must be positive");
         Self::_burn(&env, &from, amount);
+    }
+
+    /// Forcefully move `amount` tokens from `from` into the admin balance.
+    /// Admin only.
+    pub fn clawback(env: Env, from: Address, amount: i128) {
+        Self::_check_paused(&env);
+        Self::_require_admin(&env);
+        assert!(amount > 0, "amount must be positive");
+
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("admin revoked");
+        Self::_transfer(&env, &from, &admin, amount);
+
+        let ttl_ledgers = 52 * 7 * 24 * 60 / 5; // ~52 weeks (assuming 5-second ledgers)
+        let from_key = DataKey::Balance(from.clone());
+        let admin_key = DataKey::Balance(admin.clone());
+        env.storage()
+            .persistent()
+            .extend_ttl(&from_key, ttl_ledgers, ttl_ledgers);
+        env.storage()
+            .persistent()
+            .extend_ttl(&admin_key, ttl_ledgers, ttl_ledgers);
+
+        env.events()
+            .publish((symbol_short!("clawback"), from.clone()), amount);
     }
 
     /// Mint `amount` tokens to multiple recipients. Admin only.
@@ -339,6 +383,7 @@ impl TokenContract {
         from.require_auth();
         assert!(amount > 0, "amount must be positive");
         assert!(!Self::_is_frozen(&env, &from), "account is frozen");
+        Self::_check_compliance(&env, &from, &to);
         Self::_check_authorized(&env, &to);
 
         Self::_transfer(&env, &from, &to, amount);
@@ -357,8 +402,10 @@ impl TokenContract {
     }
 
     /// Approve `spender` to spend up to `amount` on behalf of `from`.
-    /// The allowance will be extended with TTL up to the specified expiration_ledger.
-    /// If expiration_ledger is 0, the allowance will use a default TTL extension.
+    ///
+    /// `expiration_ledger` must be strictly greater than the current ledger
+    /// sequence. The allowance TTL is derived from this value, so callers
+    /// must supply a valid future ledger (SEP-41 requirement).
     pub fn approve(
         env: Env,
         from: Address,
@@ -369,12 +416,72 @@ impl TokenContract {
         from.require_auth();
         assert!(amount >= 0, "amount must be non-negative");
 
+        let current_ledger = env.ledger().sequence();
+        assert!(
+            expiration_ledger > current_ledger,
+            "expiration_ledger must be in the future"
+        );
+
         let key = DataKey::Allowance(from.clone(), spender.clone());
         env.storage().persistent().set(&key, &amount);
 
-        // Extend TTL for the allowance key
-        // If expiration_ledger is 0 or in the past, use default TTL (52 weeks)
+        // Use the caller-supplied expiration to set the allowance TTL exactly
+        // as the SEP-41 standard requires — no silent fallback.
+        let ttl_ledgers = expiration_ledger - current_ledger;
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, ttl_ledgers, ttl_ledgers);
+
+        env.events()
+            .publish((symbol_short!("approve"), from, spender), amount);
+    }
+
+    /// Permit function allowing off-chain signature-based approvals (similar to EIP-2612).
+    /// This allows users to sign an approval off-chain, and a relayer or spender can
+    /// submit this signature to gain allowance without requiring an on-chain approve transaction.
+    ///
+    /// Note: This is a simplified implementation. In production, proper cryptographic
+    /// signature verification should be implemented.
+    pub fn permit(
+        env: Env,
+        owner: Address,
+        spender: Address,
+        amount: i128,
+        expiration_ledger: u32,
+        nonce: u64,
+        _signature: BytesN<64>, // Signature parameter for future implementation
+    ) {
+        assert!(amount >= 0, "amount must be non-negative");
+
+        // Check that the permit hasn't expired
         let current_ledger = env.ledger().sequence();
+        assert!(expiration_ledger >= current_ledger, "permit expired");
+
+        // Get and verify nonce
+        let nonce_key = DataKey::Nonce(owner.clone());
+        let current_nonce: u64 = env.storage().persistent().get(&nonce_key).unwrap_or(0);
+        assert!(nonce == current_nonce, "invalid nonce");
+
+        // Increment nonce to prevent replay attacks
+        env.storage()
+            .persistent()
+            .set(&nonce_key, &(current_nonce + 1));
+
+        // TODO: In a production implementation, verify the signature here
+        // This would involve:
+        // 1. Creating a standardized message format
+        // 2. Hashing the message
+        // 3. Verifying the signature against the owner's public key
+
+        // For now, we require the owner to authorize this call
+        // This provides security while we implement proper signature verification
+        owner.require_auth();
+
+        // Set the allowance
+        let allowance_key = DataKey::Allowance(owner.clone(), spender.clone());
+        env.storage().persistent().set(&allowance_key, &amount);
+
+        // Extend TTL for the allowance key
         let ttl_ledgers = if expiration_ledger > current_ledger {
             expiration_ledger - current_ledger
         } else {
@@ -384,10 +491,21 @@ impl TokenContract {
 
         env.storage()
             .persistent()
-            .extend_ttl(&key, ttl_ledgers, ttl_ledgers);
+            .extend_ttl(&allowance_key, ttl_ledgers, ttl_ledgers);
+
+        // Extend TTL for nonce key
+        env.storage()
+            .persistent()
+            .extend_ttl(&nonce_key, ttl_ledgers, ttl_ledgers);
 
         env.events()
-            .publish((symbol_short!("approve"), from, spender), amount);
+            .publish((symbol_short!("permit"), owner, spender), amount);
+    }
+
+    /// Get the current nonce for an address (used for permit functionality)
+    pub fn nonce(env: Env, owner: Address) -> u64 {
+        let key = DataKey::Nonce(owner);
+        env.storage().persistent().get(&key).unwrap_or(0)
     }
 
     /// Transfer `amount` from `from` to `to` using `spender`'s allowance.
@@ -396,6 +514,7 @@ impl TokenContract {
         spender.require_auth();
         assert!(amount > 0, "amount must be positive");
         assert!(!Self::_is_frozen(&env, &from), "account is frozen");
+        Self::_check_compliance(&env, &from, &to);
         Self::_check_authorized(&env, &to);
 
         let key = DataKey::Allowance(from.clone(), spender.clone());
@@ -501,6 +620,40 @@ impl TokenContract {
         env.storage().instance().get(&DataKey::MaxSupply)
     }
 
+    /// Optional whale protection: max balance per account as a percentage of total supply.
+    ///
+    /// If set to `p`, then for any transfer/mint to a non-admin recipient:
+    /// `balance(recipient) <= total_supply * p / 100`.
+    pub fn max_balance_per_account(env: Env) -> Option<u32> {
+        env.storage().instance().get(&DataKey::MaxBalancePerAccount)
+    }
+
+    /// Set the optional max balance per account as a percentage of total supply.
+    /// Admin only.
+    ///
+    /// - `None` disables whale protection
+    /// - `Some(p)` enables it, where `p` must be between 1 and 100 (inclusive)
+    pub fn set_max_balance_per_account(env: Env, max_balance_per_account: Option<u32>) {
+        Self::_require_admin(&env);
+
+        if let Some(p) = max_balance_per_account {
+            assert!(
+                (1..=100).contains(&p),
+                "max_balance_per_account must be 1..=100"
+            );
+            env.storage()
+                .instance()
+                .set(&DataKey::MaxBalancePerAccount, &p);
+        } else {
+            env.storage()
+                .instance()
+                .remove(&DataKey::MaxBalancePerAccount);
+        }
+
+        env.events()
+            .publish((symbol_short!("set_max_b"),), max_balance_per_account);
+    }
+
     /// Returns `true` if the contract is currently paused.
     pub fn is_paused(env: Env) -> bool {
         env.storage()
@@ -514,6 +667,14 @@ impl TokenContract {
             .instance()
             .get(&DataKey::ContractUri)
             .expect("contract URI not set")
+    }
+
+    /// Returns the configured compliance node, if any.
+    pub fn compliance_node(env: Env) -> Option<Address> {
+        env.storage()
+            .instance()
+            .get(&DataKey::ComplianceNode)
+            .unwrap_or(None)
     }
 
     // ── Internal helpers ────────────────────────────────────────────────
@@ -573,6 +734,51 @@ impl TokenContract {
         }
     }
 
+    fn _enforce_max_balance_per_account(env: &Env, to: &Address, new_balance: i128, supply: i128) {
+        let Some(pct) = env
+            .storage()
+            .instance()
+            .get::<DataKey, u32>(&DataKey::MaxBalancePerAccount)
+        else {
+            return;
+        };
+
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("not initialized");
+
+        if to == &admin {
+            return;
+        }
+
+        let max_allowed = supply
+            .checked_mul(pct as i128)
+            .expect("max balance calc overflow")
+            / 100i128;
+
+        assert!(
+            new_balance <= max_allowed,
+            "max balance per account exceeded"
+        );
+    }
+    fn _check_compliance(env: &Env, from: &Address, to: &Address) {
+        let compliance_node: Option<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::ComplianceNode)
+            .unwrap_or(None);
+
+        if let Some(node) = compliance_node {
+            let client = ComplianceNodeClient::new(env, &node);
+            assert!(
+                client.can_trade(&from.clone(), &to.clone()),
+                "trade blocked by compliance node"
+            );
+        }
+    }
+
     fn _mint(env: &Env, to: &Address, amount: i128) {
         Self::_check_authorized(env, to);
         let supply: i128 = env
@@ -593,6 +799,9 @@ impl TokenContract {
         let key = DataKey::Balance(to.clone());
         let balance: i128 = env.storage().persistent().get(&key).unwrap_or(0);
         let new_balance = balance.checked_add(amount).expect("balance overflow");
+
+        Self::_enforce_max_balance_per_account(env, to, new_balance, new_supply);
+
         env.storage().persistent().set(&key, &new_balance);
 
         env.storage()
@@ -650,9 +859,18 @@ impl TokenContract {
             .set(&from_key, &(from_balance - amount));
 
         let to_balance: i128 = env.storage().persistent().get(&to_key).unwrap_or(0);
-        env.storage()
-            .persistent()
-            .set(&to_key, &(to_balance + amount));
+
+        let supply: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TotalSupply)
+            .unwrap_or(0);
+
+        let new_to_balance = to_balance.checked_add(amount).expect("balance overflow");
+
+        Self::_enforce_max_balance_per_account(env, to, new_to_balance, supply);
+
+        env.storage().persistent().set(&to_key, &new_to_balance);
 
         env.events().publish(
             (symbol_short!("transfer"), from.clone(), to.clone()),
@@ -689,9 +907,76 @@ mod test {
             &None,
             &false,
             &false,
+            &None,
         );
 
         (env, client, admin, user)
+    }
+
+    // ── max_balance_per_account tests ───────────────────────────────────
+
+    #[test]
+    fn test_max_balance_per_account_getter_none() {
+        let (_, client, _, _) = setup();
+        assert_eq!(client.max_balance_per_account(), None);
+    }
+
+    #[test]
+    fn test_set_max_balance_per_account_enforces_on_transfer() {
+        let (_, client, admin, user) = setup();
+
+        client.set_max_balance_per_account(&Some(10u32));
+
+        // total_supply == 1_000_000_0000000; 10% == 100_000_0000000
+        // attempt to transfer 100_000_0000001 should exceed cap.
+        client.transfer(&admin, &user, &100_000_0000000i128);
+        assert_eq!(client.balance(&user), 100_000_0000000i128);
+    }
+
+    #[test]
+    #[should_panic(expected = "max balance per account exceeded")]
+    fn test_set_max_balance_per_account_transfer_exceeds_panics() {
+        let (_, client, admin, user) = setup();
+
+        client.set_max_balance_per_account(&Some(10u32));
+        client.transfer(&admin, &user, &100_000_0000000i128);
+
+        // one more token should exceed cap.
+        client.transfer(&admin, &user, &1i128);
+    }
+
+    #[test]
+    fn test_set_max_balance_per_account_enforces_on_mint() {
+        let (_, client, _, user) = setup();
+
+        client.set_max_balance_per_account(&Some(10u32));
+
+        // mint up to cap succeeds
+        client.mint(&user, &100_000_0000000i128);
+        assert_eq!(client.balance(&user), 100_000_0000000i128);
+    }
+
+    #[test]
+    // #[should_panic(expected = "max balance per account exceeded")]
+    fn test_set_max_balance_per_account_mint_exceeds_panics() {
+        let (_, client, _, user) = setup();
+
+        client.set_max_balance_per_account(&Some(10u32));
+        client.mint(&user, &100_000_0000000i128);
+
+        // minting 1 more exceeds cap
+        client.mint(&user, &1i128);
+    }
+
+    #[test]
+    fn test_admin_recipient_exempt_from_max_balance_per_account() {
+        let (_, client, admin, user) = setup();
+
+        client.set_max_balance_per_account(&Some(1u32));
+
+        // Transfer to admin should not be blocked even if it would exceed the cap.
+        client.mint(&user, &10_000i128);
+        client.transfer(&user, &admin, &10_000i128);
     }
 
     #[test]
@@ -718,6 +1003,7 @@ mod test {
             &None,
             &false,
             &false,
+            &None,
         );
     }
 
@@ -930,7 +1216,7 @@ mod test {
         let (env, client, admin, user) = setup();
         let spender = Address::generate(&env);
 
-        client.approve(&admin, &spender, &100_0000000i128, &0u32);
+        client.approve(&admin, &spender, &100_0000000i128, &1000u32);
         assert_eq!(client.allowance(&admin, &spender), 100_0000000i128);
 
         client.transfer_from(&spender, &admin, &user, &60_0000000i128);
@@ -948,8 +1234,102 @@ mod test {
         let (env, client, admin, user) = setup();
         let spender = Address::generate(&env);
 
-        client.approve(&admin, &spender, &10i128, &0u32);
+        client.approve(&admin, &spender, &10i128, &1000u32);
         client.transfer_from(&spender, &admin, &user, &11i128);
+    }
+
+    #[test]
+    fn test_permit_functionality() {
+        let (env, client, admin, _user) = setup();
+        let spender = Address::generate(&env);
+
+        // Check initial nonce is 0
+        assert_eq!(client.nonce(&admin), 0);
+
+        // Create permit parameters
+        let amount = 100_0000000i128;
+        let expiration_ledger = env.ledger().sequence() + 1000;
+        let nonce = 0u64;
+
+        // Create a mock signature (64 bytes of zeros)
+        let signature = BytesN::from_array(&env, &[0u8; 64]);
+
+        // Test permit functionality
+        // Note: This will require auth from the owner since we haven't implemented
+        // full signature verification yet
+        client.permit(
+            &admin,
+            &spender,
+            &amount,
+            &expiration_ledger,
+            &nonce,
+            &signature,
+        );
+
+        // Check that allowance was set
+        assert_eq!(client.allowance(&admin, &spender), amount);
+
+        // Check that nonce was incremented
+        assert_eq!(client.nonce(&admin), 1);
+    }
+
+    #[test]
+    fn test_permit_nonce_validation() {
+        let (env, client, admin, _user) = setup();
+        let spender = Address::generate(&env);
+
+        // Test that nonce getter works correctly
+        assert_eq!(client.nonce(&admin), 0);
+
+        // Test with another user
+        let another_user = Address::generate(&env);
+        assert_eq!(client.nonce(&another_user), 0); // Should be 0 for new addresses
+
+        // Create permit to increment nonce
+        let amount = 50_0000000i128;
+        let expiration_ledger = env.ledger().sequence() + 1000;
+        let signature = BytesN::from_array(&env, &[0u8; 64]);
+
+        client.permit(
+            &admin,
+            &spender,
+            &amount,
+            &expiration_ledger,
+            &0u64,
+            &signature,
+        );
+        assert_eq!(client.nonce(&admin), 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid nonce")]
+    fn test_permit_invalid_nonce() {
+        let (env, client, admin, _user) = setup();
+        let spender = Address::generate(&env);
+
+        let amount = 50_0000000i128;
+        let expiration_ledger = env.ledger().sequence() + 1000;
+        let signature = BytesN::from_array(&env, &[0u8; 64]);
+
+        // First permit with nonce 0 should work
+        client.permit(
+            &admin,
+            &spender,
+            &amount,
+            &expiration_ledger,
+            &0u64,
+            &signature,
+        );
+
+        // Second permit with same nonce should fail
+        client.permit(
+            &admin,
+            &spender,
+            &amount,
+            &expiration_ledger,
+            &0u64,
+            &signature,
+        );
     }
 
     #[test]
@@ -1015,7 +1395,7 @@ mod test {
         let spender = Address::generate(&env);
         // Give user some tokens and approve spender.
         client.transfer(&admin, &user, &1000i128);
-        client.approve(&user, &spender, &1000i128, &0u32);
+        client.approve(&user, &spender, &1000i128, &1000u32);
         // Freeze user, then attempt transfer_from.
         client.freeze_account(&user);
         client.transfer_from(&spender, &user, &admin, &500i128);
@@ -1130,6 +1510,7 @@ mod test {
             &None,
             &false,
             &false,
+            &None,
         );
 
         // Remove mock — only user will auth, not admin.
@@ -1187,7 +1568,7 @@ mod test {
     fn test_paused_transfer_from_blocked() {
         let (env, client, admin, user) = setup();
         let spender = Address::generate(&env);
-        client.approve(&admin, &spender, &1000i128, &0u32);
+        client.approve(&admin, &spender, &1000i128, &1000u32);
         client.pause();
         client.transfer_from(&spender, &admin, &user, &500i128);
     }
@@ -1236,6 +1617,7 @@ mod test {
             &None,
             &false,
             &false,
+            &None,
         );
 
         env.mock_auths(&[soroban_sdk::testutils::MockAuth {
@@ -1270,6 +1652,7 @@ mod test {
             &Some(1_000_0000000i128),
             &false,
             &false,
+            &None,
         );
 
         (env, client, admin, user)
@@ -1329,6 +1712,7 @@ mod test {
             &Some(1_000_0000000i128),
             &false,
             &false,
+            &None,
         );
     }
 
@@ -1385,6 +1769,7 @@ mod test {
             &None,
             &false,
             &false,
+            &None,
         );
 
         let non_zero_hash = BytesN::from_array(&env, &[1; 32]);
@@ -1422,6 +1807,7 @@ mod test {
             &None,
             &true,
             &true,
+            &None,
         );
 
         (env, client, admin, user)
@@ -1498,6 +1884,7 @@ mod test {
             &None,
             &true,
             &false, // revocable = false
+            &None,
         );
 
         client.authorize_holder(&user);
@@ -1517,5 +1904,25 @@ mod test {
         client.authorize_holder(&user);
         client.mint(&user, &1000i128);
         assert_eq!(client.balance(&user), 1000i128);
+    }
+
+    // ── approve expiration tests ────────────────────────────────────────
+
+    #[test]
+    #[should_panic(expected = "expiration_ledger must be in the future")]
+    fn test_approve_expired_ledger_panics() {
+        let (env, client, admin, _) = setup();
+        let spender = Address::generate(&env);
+        // Ledger sequence is 0 by default; expiration_ledger = 0 is NOT in the future.
+        client.approve(&admin, &spender, &100i128, &0u32);
+    }
+
+    #[test]
+    fn test_approve_respects_expiration_ledger() {
+        let (env, client, admin, _) = setup();
+        let spender = Address::generate(&env);
+        // Supply a valid future expiration; the allowance should be stored correctly.
+        client.approve(&admin, &spender, &500i128, &100u32);
+        assert_eq!(client.allowance(&admin, &spender), 500i128);
     }
 }

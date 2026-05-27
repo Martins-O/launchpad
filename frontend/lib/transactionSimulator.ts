@@ -12,6 +12,7 @@ export interface PreflightCheckResult {
     cost: string;
     footprint: string;
   };
+  estimatedFee?: string;
 }
 
 /**
@@ -29,6 +30,8 @@ const ERROR_MESSAGE_MAP: Record<string, string> = {
   "not initialized": "Contract is not initialized. This token may not exist.",
   "no pending admin": "No pending admin to accept. Did you propose_admin first?",
   "insufficient balance to burn": "Cannot burn more tokens than the account holds.",
+  "trade blocked by compliance node": "The compliance node rejected this transfer.",
+  "vesting contract is paused": "The vesting contract is paused and cannot process this action.",
   "schedule already exists": "A vesting schedule already exists for this recipient.",
   "no schedule found": "No vesting schedule found for this recipient.",
   "schedule has been revoked": "This vesting schedule has been revoked.",
@@ -300,6 +303,8 @@ export async function simulateTokenDeployment(
   config: NetworkConfig,
   authorizationRequired: boolean = false,
   authorizationRevocable: boolean = false,
+  complianceNodeAddress: string | null = null,
+  sourcePublicKey?: string,
 ): Promise<PreflightCheckResult> {
   try {
     const rpc = new StellarSdk.rpc.Server(config.rpcUrl);
@@ -308,29 +313,57 @@ export async function simulateTokenDeployment(
     // getLatestLedger is a lightweight read that confirms the RPC is up.
     await rpc.getLatestLedger();
 
-    // ── 2. Admin account check ─────────────────────────────────────────
-    // Horizon is the authoritative source for account existence; an
-    // account that hasn't been funded cannot be a valid admin.
+    // ── 2. Admin / signer account checks ───────────────────────────────
     const horizon = new StellarSdk.Horizon.Server(config.horizonUrl);
+    const sourceAddress = sourcePublicKey ?? (adminAddress.startsWith("G") ? adminAddress : "");
+    if (!sourceAddress) {
+      return {
+        success: false,
+        warnings: [],
+        errors: [
+          "Connect a wallet to deploy when using a contract or multisig admin address.",
+        ],
+      };
+    }
+
     try {
-      await horizon.loadAccount(adminAddress);
+      await horizon.loadAccount(sourceAddress);
     } catch {
       return {
         success: false,
         warnings: [],
         errors: [
-          "Admin account not found on the network. Ensure it is funded before deploying.",
+          "Deployment signer account not found on the network. Ensure it is funded before deploying.",
         ],
       };
+    }
+
+    if (adminAddress.startsWith("G")) {
+      try {
+        await horizon.loadAccount(adminAddress);
+      } catch {
+        return {
+          success: false,
+          warnings: [],
+          errors: [
+            "Admin account not found on the network. Ensure it is funded before deploying.",
+          ],
+        };
+      }
     }
 
     // ── 3. Simulate initialize via Soroban RPC ─────────────────────────
     // Build the ScVal arguments that match the contract's initialize
     // signature: (admin, decimal, name, symbol, initial_supply, max_supply,
-    //             authorization_required, authorization_revocable)
+    //             authorization_required, authorization_revocable,
+    //             compliance_node)
     const maxSupplyScVal =
       maxSupply !== null
         ? StellarSdk.nativeToScVal(maxSupply, { type: "i128" })
+        : StellarSdk.xdr.ScVal.scvVoid();
+    const complianceNodeScVal =
+      complianceNodeAddress && complianceNodeAddress.trim().length > 0
+        ? new StellarSdk.Address(complianceNodeAddress.trim()).toScVal()
         : StellarSdk.xdr.ScVal.scvVoid();
 
     const args: StellarSdk.xdr.ScVal[] = [
@@ -342,12 +375,13 @@ export async function simulateTokenDeployment(
       maxSupplyScVal,
       StellarSdk.nativeToScVal(authorizationRequired, { type: "bool" }),
       StellarSdk.nativeToScVal(authorizationRevocable, { type: "bool" }),
+      complianceNodeScVal,
     ];
 
-    const account = new StellarSdk.Account(adminAddress, "0");
+    const account = new StellarSdk.Account(sourceAddress, "0");
     const contract = new StellarSdk.Contract(PLACEHOLDER_CONTRACT_ID);
     const tx = new StellarSdk.TransactionBuilder(account, {
-      fee: "100",
+      fee: StellarSdk.BASE_FEE,
       networkPassphrase: config.passphrase,
     })
       .addOperation(contract.call("initialize", ...args))
@@ -356,27 +390,41 @@ export async function simulateTokenDeployment(
 
     const sim = await rpc.simulateTransaction(tx);
 
+    let estimatedFee = "0.01";
+    
+    if (StellarSdk.rpc.Api.isSimulationSuccess(sim)) {
+      try {
+        const minResourceFee = Number(sim.minResourceFee || "0");
+        const baseFee = Number(StellarSdk.BASE_FEE);
+        const totalFee = (minResourceFee + baseFee) / 10_000_000;
+        estimatedFee = totalFee.toFixed(7);
+      } catch {
+        estimatedFee = "0.01";
+      }
+    }
+
     // "Contract not found" is the expected outcome for a not-yet-deployed
     // token – it means connectivity and argument encoding are both fine.
     if (StellarSdk.rpc.Api.isSimulationError(sim)) {
       if (isExpectedPreflightError(sim.error)) {
-        return { success: true, warnings: [], errors: [] };
+        return { success: true, warnings: [], errors: [], estimatedFee };
       }
       const friendlyError = parseSorobanError(sim.error);
-      return { success: false, warnings: [], errors: [friendlyError] };
+      return { success: false, warnings: [], errors: [friendlyError], estimatedFee };
     }
 
     // An unexpected success (shouldn't happen with placeholder) is fine too.
-    return { success: true, warnings: [], errors: [] };
+    return { success: true, warnings: [], errors: [], estimatedFee };
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     if (isExpectedPreflightError(msg)) {
-      return { success: true, warnings: [], errors: [] };
+      return { success: true, warnings: [], errors: [], estimatedFee: "0.01" };
     }
     return {
       success: false,
       warnings: [],
       errors: [parseSorobanError(msg)],
+      estimatedFee: "0.01",
     };
   }
 }

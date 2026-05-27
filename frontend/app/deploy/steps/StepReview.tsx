@@ -32,6 +32,10 @@ const FlagItem = ({ label, enabled }: { label: string; enabled: boolean }) => (
 export const StepReview = ({ control }: StepProps) => {
     const formData = useWatch({ control });
     const { publicKey, connect } = useWallet();
+    const adminModeLabel =
+        formData.adminMode === "wallet"
+            ? "Connected wallet"
+            : "Existing multisig / DAO contract";
 
     return (
         <div className="space-y-6 animate-fade-in-up">
@@ -51,7 +55,9 @@ export const StepReview = ({ control }: StepProps) => {
                 <SummaryItem label="Decimals" value={formData.decimals} />
                 <SummaryItem label="Initial Supply" value={formData.initialSupply !== undefined ? new Intl.NumberFormat('en-US').format(formData.initialSupply) : undefined} />
                 <SummaryItem label="Max Supply" value={formData.maxSupply !== undefined ? new Intl.NumberFormat('en-US').format(formData.maxSupply) : "Unlimited"} />
+                <SummaryItem label="Admin Type" value={adminModeLabel} />
                 <SummaryItem label="Admin Address" value={formData.adminAddress} />
+                <SummaryItem label="Compliance Node" value={formData.complianceNodeAddress || "None"} />
                 <FlagItem label="Authorization Required" enabled={!!formData.authorizationRequired} />
                 <FlagItem label="Authorization Revocable" enabled={!!formData.authorizationRevocable} />
                 <SummaryItem label="Description" value={formData.description} />
@@ -68,6 +74,7 @@ export const StepReview = ({ control }: StepProps) => {
                         You will need to call <code className="bg-blue-900/40 px-1 rounded">authorize_holder</code> for
                         each address before it can receive tokens.
                         {formData.authorizationRevocable && " Holder authorization can be revoked by the admin at any time."}
+                        {formData.complianceNodeAddress && " Transfers will also be checked against the configured compliance node."}
                     </p>
                 </div>
             )}

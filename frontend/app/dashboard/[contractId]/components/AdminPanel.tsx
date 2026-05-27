@@ -221,9 +221,9 @@ export function AdminPanel({ contractId, maxSupply, totalSupply }: AdminPanelPro
                 const mintData = data as MintData;
                 method = "mint";
                 args = [addressToScVal(mintData.to), i128ToScVal(BigInt(mintData.amount))];
-            } else if (action === "burn") {
+            } else if (action === "clawback") {
                 const burnData = data as BurnData;
-                method = "burn_admin"; // Use administrative burn
+                method = "clawback";
                 args = [addressToScVal(burnData.from), i128ToScVal(BigInt(burnData.amount))];
             } else if (action === "transfer") {
                 const transferData = data as TransferAdminData;
@@ -279,7 +279,7 @@ export function AdminPanel({ contractId, maxSupply, totalSupply }: AdminPanelPro
             setSuccess(action);
 
             if (action === "mint") mintForm.reset();
-            if (action === "burn") burnForm.reset();
+            if (action === "clawback") burnForm.reset();
             if (action === "transfer") {
                 transferForm.reset();
                 setShowTransferConfirm(false);
@@ -548,9 +548,9 @@ export function AdminPanel({ contractId, maxSupply, totalSupply }: AdminPanelPro
                         <div className="p-2 bg-red-500/10 rounded-lg group-hover:scale-110 transition-transform">
                             <Flame className="w-5 h-5" />
                         </div>
-                        <h3 className="font-bold text-lg">Burn Assets</h3>
+                        <h3 className="font-bold text-lg">Clawback Assets</h3>
                     </div>
-                    <form onSubmit={burnForm.handleSubmit((data) => handleAction("burn", data))} className="space-y-4 flex-grow">
+                    <form onSubmit={burnForm.handleSubmit((data) => handleAction("clawback", data))} className="space-y-4 flex-grow">
                         <Input
                             label="Source Address"
                             placeholder="G..."
@@ -570,12 +570,12 @@ export function AdminPanel({ contractId, maxSupply, totalSupply }: AdminPanelPro
                             type="submit"
                             variant="secondary"
                             className="w-full mt-4 border-red-500/20 hover:border-red-500/40 text-red-400"
-                            isLoading={loading === "burn"}
+                            isLoading={loading === "clawback"}
                             disabled={adminDisabled}
                         >
-                            {success === "burn" ? (
+                            {success === "clawback" ? (
                                 <span className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4" /> Success</span>
-                            ) : "Burn Tokens"}
+                            ) : "Clawback Tokens"}
                         </Button>
                     </form>
                 </div>

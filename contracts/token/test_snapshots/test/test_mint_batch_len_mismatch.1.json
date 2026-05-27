@@ -268,7 +268,8 @@
                 },
                 {
                   "bool": false
-                }
+                },
+                "void"
               ]
             }
           }
@@ -408,7 +409,7 @@
             "data": {
               "vec": [
                 {
-                  "string": "caught panic 'mismatching lengths' from contract function 'Symbol(obj#83)'"
+                  "string": "caught panic 'mismatching lengths' from contract function 'Symbol(obj#87)'"
                 },
                 {
                   "vec": [

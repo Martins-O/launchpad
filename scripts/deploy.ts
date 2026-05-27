@@ -13,7 +13,8 @@ Usage:
     --name "My Token" \\
     --symbol MTK \\
     --supply 1000000 \\
-    --max-supply 10000000
+    --max-supply 10000000 \\
+    --compliance-node C...
 
 Flags:
   --network      Soroban network (local | testnet | mainnet | futurenet)  [required]
@@ -22,6 +23,7 @@ Flags:
   --symbol       Token symbol                                      [required]
   --supply       Initial token supply                              [required]
   --max-supply   Maximum supply cap                                [optional]
+  --compliance-node Optional compliance node contract ID          [optional]
   --decimals     Token decimal precision (default: 7)              [optional]
   --help         Show this help message
 `.trim();
@@ -80,6 +82,12 @@ function validate(args: Record<string, string>): void {
       process.exit(1);
     }
   }
+
+  const complianceNode = args["compliance-node"];
+  if (complianceNode && !/^C[A-Z2-7]{55}$/.test(complianceNode)) {
+    console.error("Error: --compliance-node must be a valid contract address.");
+    process.exit(1);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -111,6 +119,7 @@ function main(): void {
 
   const { network, admin, name, symbol, supply } = args;
   const maxSupply = args["max-supply"];
+  const complianceNode = args["compliance-node"];
   const decimals = args.decimals || "7";
   const rootDir = resolve(__dirname, "..");
   const wasmPath = resolve(
@@ -149,6 +158,9 @@ function main(): void {
   ];
   if (maxSupply) {
     initArgs.push(`--max_supply ${maxSupply}`);
+  }
+  if (complianceNode) {
+    initArgs.push(`--compliance_node ${complianceNode}`);
   }
   exec(
     `soroban contract invoke --id ${contractId} --network ${network} --source ${admin} -- initialize ${initArgs.join(" ")}`,

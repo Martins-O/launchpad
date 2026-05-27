@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { fetchTokenInfo } from "@/lib/stellar";
+import { fetchTokenInfo, validateTokenContract } from "@/lib/stellar";
 import { NETWORKS } from "@/types/network";
 import PublicTokenPage from "./PublicTokenPage";
 
@@ -13,6 +13,22 @@ export async function generateMetadata({
   const { contractId } = await params;
 
   try {
+    // First validate the token contract
+    const validation = await validateTokenContract(contractId, NETWORKS.testnet);
+    
+    if (!validation.isValid) {
+      // Return fallback metadata for invalid contracts
+      return {
+        title: `Invalid Token Contract — ${contractId.slice(0, 8)}... | SoroPad`,
+        description: `The contract ${contractId} does not appear to be a valid SEP-41 token contract.`,
+        openGraph: {
+          title: `Invalid Token Contract — ${contractId.slice(0, 8)}...`,
+          description: `This contract does not implement the SEP-41 token standard`,
+          type: "website",
+        },
+      };
+    }
+
     const tokenInfo = await fetchTokenInfo(contractId, NETWORKS.testnet);
 
     return {

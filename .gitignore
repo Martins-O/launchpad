@@ -1,3 +1,5 @@
 target/
 frontend/.next
 frontend/node_modules
+issue.md
+pr.md

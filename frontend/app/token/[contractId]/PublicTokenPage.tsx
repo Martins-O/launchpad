@@ -16,6 +16,7 @@ import {
   type TokenHolder,
 } from "@/lib/stellar";
 import { useSoroban } from "@/hooks/useSoroban";
+import InvalidTokenContract from "../../components/InvalidTokenContract";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -310,17 +311,32 @@ export default function PublicTokenPage({
 }: {
   contractId: string;
 }) {
-  const { fetchTokenInfo, fetchTopHolders } = useSoroban();
+  const { fetchTokenInfo, fetchTopHolders, validateTokenContract } = useSoroban();
   const [tokenInfo, setTokenInfo] = useState<TokenInfo | null>(null);
   const [holders, setHolders] = useState<TokenHolder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isValidToken, setIsValidToken] = useState<boolean | null>(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setIsValidToken(null);
 
     try {
+      // First validate the token contract
+      const validation = await validateTokenContract(contractId);
+      
+      if (!validation.isValid) {
+        setIsValidToken(false);
+        setError(validation.error || "Invalid token contract");
+        setLoading(false);
+        return;
+      }
+
+      setIsValidToken(true);
+
+      // If validation passes, fetch token info
       const info = await fetchTokenInfo(contractId);
       setTokenInfo(info);
 
@@ -328,21 +344,33 @@ export default function PublicTokenPage({
       const holderData = await fetchTopHolders(contractId);
       setHolders(holderData);
     } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Failed to fetch token data. Please check the contract ID and try again.",
-      );
+      // If fetchTokenInfo fails, it might be a validation issue
+      if (err instanceof Error && err.message.includes("Invalid token contract")) {
+        setIsValidToken(false);
+        setError(err.message);
+      } else {
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Failed to fetch token data. Please check the contract ID and try again.",
+        );
+      }
     } finally {
       setLoading(false);
     }
-  }, [contractId, fetchTokenInfo, fetchTopHolders]);
+  }, [contractId, fetchTokenInfo, fetchTopHolders, validateTokenContract]);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
 
   if (loading) return <LoadingState />;
+  
+  // Show invalid token component if validation failed
+  if (isValidToken === false) {
+    return <InvalidTokenContract contractId={contractId} error={error || undefined} />;
+  }
+  
   if (error) return <ErrorState message={error} onRetry={loadData} />;
   if (!tokenInfo) return null;
 

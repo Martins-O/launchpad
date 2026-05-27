@@ -168,6 +168,8 @@ export function useTransactionSimulator() {
       maxSupply: bigint | null,
       authorizationRequired: boolean = false,
       authorizationRevocable: boolean = false,
+      complianceNodeAddress: string | null = null,
+      sourcePublicKey?: string,
     ): Promise<PreflightCheckResult> {
       return runSimulation(() =>
         simulateTokenDeployment(
@@ -180,6 +182,8 @@ export function useTransactionSimulator() {
           networkConfig,
           authorizationRequired,
           authorizationRevocable,
+          complianceNodeAddress,
+          sourcePublicKey,
         ),
       );
     },

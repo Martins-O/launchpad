@@ -1,10 +1,11 @@
 "use client";
 
 import { UseFormRegister, FieldErrors, Control, useController } from "react-hook-form";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Input } from "@/components/ui/Input";
 import { DeployFormData } from "../DeployForm";
-import { ChevronDown, ChevronUp, ShieldCheck } from "lucide-react";
+import { ChevronDown, ChevronUp, ShieldCheck, Wallet, Landmark } from "lucide-react";
+import { useWallet } from "@/app/hooks/useWallet";
 
 interface StepProps {
     register: UseFormRegister<DeployFormData>;
@@ -56,11 +57,25 @@ const Toggle = ({ id, label, description, checked, onChange, disabled }: ToggleP
 
 export const StepAdmin = ({ register, errors, control }: StepProps) => {
     const [advancedOpen, setAdvancedOpen] = useState(false);
+    const { publicKey } = useWallet();
 
+    const { field: adminModeField } = useController({ control, name: "adminMode" });
+    const { field: adminAddressField } = useController({ control, name: "adminAddress" });
     const { field: authRequiredField } = useController({ control, name: "authorizationRequired" });
     const { field: authRevocableField } = useController({ control, name: "authorizationRevocable" });
 
+    const adminMode = adminModeField.value as "wallet" | "custom";
     const authRequired = authRequiredField.value;
+
+    useEffect(() => {
+        if (adminMode === "wallet") {
+            if (publicKey && adminAddressField.value !== publicKey) {
+                adminAddressField.onChange(publicKey);
+            } else if (!publicKey && adminModeField.value !== "custom") {
+                adminModeField.onChange("custom");
+            }
+        }
+    }, [adminAddressField, adminMode, adminModeField, publicKey]);
 
     const handleAuthRequiredChange = (val: boolean) => {
         authRequiredField.onChange(val);
@@ -73,16 +88,72 @@ export const StepAdmin = ({ register, errors, control }: StepProps) => {
             <div className="text-left">
                 <h2 className="text-xl font-bold text-white mb-2">Administration</h2>
                 <p className="text-sm text-gray-400">
-                    Specify the administrative address and access-control settings for this token.
+                    Specify who controls the token and whether a compliance node should gate transfers.
                 </p>
             </div>
 
-            <Input
-                label="Admin Address (Stellar Public Key)"
-                placeholder="e.g. G..."
-                {...register("adminAddress")}
-                error={errors.adminAddress?.message as string}
-            />
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <button
+                    type="button"
+                    onClick={() => adminModeField.onChange("wallet")}
+                    disabled={!publicKey}
+                    className={`
+                        flex items-start gap-3 rounded-xl border p-4 text-left transition-colors
+                        ${adminMode === "wallet"
+                            ? "border-stellar-500/40 bg-stellar-500/10"
+                            : "border-white/10 bg-void-800/40 hover:bg-void-800/60"}
+                        ${!publicKey ? "cursor-not-allowed opacity-50" : ""}
+                    `}
+                >
+                    <Wallet className="mt-0.5 h-5 w-5 text-stellar-400" />
+                    <div>
+                        <div className="text-sm font-medium text-white">Connected Wallet</div>
+                        <p className="text-xs text-gray-500">
+                            Assign admin rights to the wallet currently connected in Freighter.
+                        </p>
+                    </div>
+                </button>
+
+                <button
+                    type="button"
+                    onClick={() => adminModeField.onChange("custom")}
+                    className={`
+                        flex items-start gap-3 rounded-xl border p-4 text-left transition-colors
+                        ${adminMode === "custom"
+                            ? "border-stellar-500/40 bg-stellar-500/10"
+                            : "border-white/10 bg-void-800/40 hover:bg-void-800/60"}
+                    `}
+                >
+                    <Landmark className="mt-0.5 h-5 w-5 text-stellar-400" />
+                    <div>
+                        <div className="text-sm font-medium text-white">Existing Multisig / DAO</div>
+                        <p className="text-xs text-gray-500">
+                            Assign admin rights to an existing smart wallet or governance contract.
+                        </p>
+                    </div>
+                </button>
+            </div>
+
+            {adminMode === "wallet" ? (
+                <Input
+                    label="Admin Address"
+                    value={publicKey ?? ""}
+                    readOnly
+                    placeholder={publicKey ?? "Connect a wallet to use this option"}
+                    error={errors.adminAddress?.message as string}
+                />
+            ) : (
+                <Input
+                    label="Admin Address or DAO Contract"
+                    placeholder="e.g. G... or C..."
+                    value={adminAddressField.value ?? ""}
+                    onChange={adminAddressField.onChange}
+                    onBlur={adminAddressField.onBlur}
+                    name={adminAddressField.name}
+                    ref={adminAddressField.ref}
+                    error={errors.adminAddress?.message as string}
+                />
+            )}
 
             <div className="bg-amber-500/10 border border-amber-500/20 p-4 rounded-xl">
                 <p className="text-xs text-amber-200 leading-relaxed">
@@ -139,6 +210,18 @@ export const StepAdmin = ({ register, errors, control }: StepProps) => {
                                 Enable &quot;Authorization Required&quot; to use &quot;Authorization Revocable&quot;.
                             </p>
                         )}
+
+                        <div className="border-t border-white/5" />
+
+                        <Input
+                            label="Compliance Node Address (Optional)"
+                            placeholder="C..."
+                            {...register("complianceNodeAddress")}
+                            error={errors.complianceNodeAddress?.message as string}
+                        />
+                        <p className="text-xs text-gray-500 leading-relaxed">
+                            When set, transfers are validated against this contract before balances move.
+                        </p>
                     </div>
                 )}
             </div>

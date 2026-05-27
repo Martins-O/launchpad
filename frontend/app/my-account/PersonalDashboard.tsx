@@ -29,6 +29,7 @@ import { PersonalHeader } from "./components/PersonalHeader";
 import { BalancesSection } from "./components/BalancesSection";
 import { VestingSection } from "./components/VestingSection";
 import { PersonalTransactionsSection } from "./components/PersonalTransactionsSection";
+import { OutgoingAllowancesSection } from "./components/OutgoingAllowancesSection";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -265,6 +266,8 @@ export default function PersonalDashboard() {
         schedule={vestingSchedule}
         currentLedger={currentLedger}
       />
+
+      <OutgoingAllowancesSection onRefresh={handleRefresh} />
 
       {/* Burn Tokens Section */}
       <section aria-label="Burn tokens" className="mb-10">

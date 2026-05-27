@@ -5,6 +5,7 @@ import type { Resolver } from "react-hook-form";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 import { PreflightCheckDisplay } from "@/components/ui/PreflightCheck";
@@ -12,12 +13,14 @@ import { StepMetadata } from "./steps/StepMetadata";
 import { StepSupply } from "./steps/StepSupply";
 import { StepAdmin } from "./steps/StepAdmin";
 import { StepReview } from "./steps/StepReview";
+import { FeeEstimation } from "./components/FeeEstimation";
 import { useTransactionSimulator } from "@/hooks/useTransactionSimulator";
 import { useWallet } from "@/app/hooks/useWallet";
 import { savePendingMetadata } from "./utils/metadata";
 import { trackDeployment } from "@/lib/deployments";
 import { ArrowLeft, ArrowRight, Rocket } from "lucide-react";
 import { useNetwork } from "@/app/providers/NetworkProvider";
+import { useDeployToken, type DeployTokenError } from "../hooks/useDeployToken";
 
 const optionalNumber = (schema: z.ZodNumber) =>
   z.preprocess((value) => {
@@ -35,7 +38,13 @@ const deploySchema = z
     maxSupply: optionalNumber(z.number().min(1, "Max supply must be at least 1")),
     adminAddress: z
       .string()
-      .regex(/^G[A-Z2-7]{55}$/, "Invalid Stellar public key"),
+      .regex(/^[GC][A-Z2-7]{55}$/, "Invalid Stellar address or contract ID"),
+    adminMode: z.enum(["wallet", "custom"]),
+    complianceNodeAddress: z
+      .string()
+      .regex(/^C[A-Z2-7]{55}$/, "Invalid compliance node contract ID")
+      .optional()
+      .or(z.literal("")),
     // Authorization flags
     authorizationRequired: z.boolean(),
     authorizationRevocable: z.boolean(),
@@ -58,6 +67,9 @@ const STEPS = ["Metadata", "Supply", "Admin", "Review"];
 export default function DeployForm() {
   const [currentStep, setCurrentStep] = useState(1);
   const [isDeploying, setIsDeploying] = useState(false);
+  const [estimatedFee, setEstimatedFee] = useState<string | null>(null);
+  const [feeEstimationLoading, setFeeEstimationLoading] = useState(false);
+  const [feeEstimationError, setFeeEstimationError] = useState<string | null>(null);
   const [preflightResult, setPreflightResult] = useState<{
     isLoading: boolean;
     success: boolean;
@@ -65,7 +77,9 @@ export default function DeployForm() {
     warnings: string[];
   } | null>(null);
 
+  const router = useRouter();
   const { publicKey } = useWallet();
+  const { deployToken } = useDeployToken();
   const COOLDOWN_MS = 60_000;
 
   const simulator = useTransactionSimulator();
@@ -86,7 +100,9 @@ export default function DeployForm() {
       initialSupply: 0,
       name: "",
       symbol: "",
-      adminAddress: "",
+      adminAddress: publicKey ?? "",
+      adminMode: publicKey ? "wallet" : "custom",
+      complianceNodeAddress: "",
       authorizationRequired: false,
       authorizationRevocable: false,
       description: "",
@@ -101,11 +117,54 @@ export default function DeployForm() {
     let fieldsToValidate: (keyof DeployFormData)[] = [];
     if (currentStep === 1) fieldsToValidate = ["name", "symbol", "decimals"];
     if (currentStep === 2) fieldsToValidate = ["initialSupply", "maxSupply"];
-    if (currentStep === 3) fieldsToValidate = ["adminAddress"];
+    if (currentStep === 3) fieldsToValidate = ["adminMode", "adminAddress", "complianceNodeAddress"];
 
     const isStepValid = await trigger(fieldsToValidate);
     if (isStepValid) {
-      setCurrentStep((prev) => Math.min(prev + 1, STEPS.length));
+      const nextStepNum = Math.min(currentStep + 1, STEPS.length);
+      setCurrentStep(nextStepNum);
+      
+      if (nextStepNum === 4) {
+        estimateFee();
+      }
+    }
+  };
+
+  const estimateFee = async () => {
+    const formData = watch();
+    if (!formData.adminAddress || !formData.name || !formData.symbol) return;
+
+    setFeeEstimationLoading(true);
+    setFeeEstimationError(null);
+    setEstimatedFee(null);
+
+    try {
+      const result = await simulator.checkTokenDeployment(
+        formData.adminAddress,
+        formData.name,
+        formData.symbol,
+        formData.decimals,
+        BigInt(Math.round((formData.initialSupply ?? 0) * 10 ** formData.decimals)),
+        formData.maxSupply != null
+          ? BigInt(Math.round(formData.maxSupply * 10 ** formData.decimals))
+          : null,
+        formData.authorizationRequired ?? false,
+        formData.authorizationRevocable ?? false,
+      );
+
+      if (result.estimatedFee) {
+        setEstimatedFee(result.estimatedFee);
+      }
+
+      if (!result.success) {
+        setFeeEstimationError(result.errors[0] || "Fee estimation failed");
+      }
+    } catch (error) {
+      setFeeEstimationError(
+        error instanceof Error ? error.message : "Failed to estimate fee"
+      );
+    } finally {
+      setFeeEstimationLoading(false);
     }
   };
 
@@ -123,15 +182,15 @@ export default function DeployForm() {
     });
 
     try {
-      // Placeholder for actual deployment logic
-      // In a real implementation, this would:
-      // 1. Build the token contract deployment transaction
-      // 2. Simulate it via Soroban RPC
-      // 3. Show results to user
-      // 4. Prompt for Freighter signature if all checks pass
-
-      console.log("Deploying with data:", data);
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      // Deploy the token contract with the form data
+      const result = await deployToken({
+        name: data.name,
+        symbol: data.symbol,
+        decimals: data.decimals,
+        initialSupply: data.initialSupply,
+        maxSupply: data.maxSupply,
+        adminAddress: data.adminAddress,
+      });
 
       setPreflightResult({
         isLoading: false,
@@ -140,8 +199,7 @@ export default function DeployForm() {
         warnings: [],
       });
 
-      // Save metadata client-side for now. If a real contractId is returned
-      // by the deployment flow, the metadata should be re-keyed by that ID.
+      // Save metadata client-side
       try {
         savePendingMetadata(data.symbol, {
           description: data.description,
@@ -150,7 +208,9 @@ export default function DeployForm() {
           twitter: data.twitter,
           discord: data.discord,
         });
-      } catch {}
+      } catch {
+        // Ignore metadata save errors
+      }
 
       // Set client-side deploy cooldown (per-wallet)
       try {
@@ -160,24 +220,50 @@ export default function DeployForm() {
         // Track deployment for user dashboard
         if (publicKey) {
           trackDeployment(publicKey, {
-            contractId: `C${Math.random().toString(36).substring(2).toUpperCase()}`, // Mocked contract ID for now
+            contractId: result.contractId,
             name: data.name,
             symbol: data.symbol,
             network: networkConfig.network,
           });
         }
-      } catch {}
+      } catch {
+        // Ignore tracking errors
+      }
 
-      alert("Token deployment simulated! Check console for data.");
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : "Unknown error";
+      // On success, navigate to the token dashboard
+      alert(
+        `Token deployed successfully!\n\nContract ID: ${result.contractId}\nTransaction Hash: ${result.transactionHash}\n\nRedirecting to dashboard...`
+      );
+      router.push(`/dashboard/${result.contractId}`);
+    } catch (err) {
+      // Handle deployment errors
+      const error = err as DeployTokenError;
+      const errorDetails: string[] = [];
+
+      if (error.type === "validation") {
+        errorDetails.push(error.message);
+      } else if (error.type === "simulation") {
+        errorDetails.push(`Simulation error: ${error.message}`);
+      } else if (error.type === "wallet") {
+        errorDetails.push(error.message);
+      } else if (error.type === "broadcast") {
+        errorDetails.push(`Broadcast error: ${error.message}`);
+      } else if (error.type === "timeout") {
+        errorDetails.push(error.message);
+      } else if (error.message) {
+        errorDetails.push(error.message);
+      } else {
+        errorDetails.push("Token deployment failed. Please try again.");
+      }
+
       setPreflightResult({
         isLoading: false,
         success: false,
-        errors: [errorMessage],
+        errors: errorDetails,
         warnings: [],
       });
+
+      console.error("Deployment error:", err);
     } finally {
       setIsDeploying(false);
     }
@@ -224,13 +310,28 @@ export default function DeployForm() {
             <StepMetadata register={register} errors={errors} />
           )}
           {currentStep === 2 && (
-  <StepSupply control={control} errors={errors} />
-)}
+            <StepSupply control={control} errors={errors} />
+          )}
           {currentStep === 3 && (
-            <StepAdmin register={register} errors={errors} control={control} />
+            <StepAdmin
+              register={register}
+              errors={errors}
+              control={control}
+            />
           )}
           {currentStep === 4 && <StepReview control={control} />}
         </div>
+
+        {/* Fee Estimation (shown on review step) */}
+        {currentStep === 4 && (
+          <div className="mt-6">
+            <FeeEstimation
+              estimatedFee={estimatedFee}
+              isLoading={feeEstimationLoading}
+              error={feeEstimationError}
+            />
+          </div>
+        )}
 
         {/* Pre-flight check results (shown on review step) */}
         {currentStep === 4 && preflightResult && (
@@ -295,6 +396,8 @@ export default function DeployForm() {
                         : null,
                       formData.authorizationRequired ?? false,
                       formData.authorizationRevocable ?? false,
+                      formData.complianceNodeAddress || null,
+                      publicKey ?? undefined,
                     );
                     setPreflightResult({
                       isLoading: false,

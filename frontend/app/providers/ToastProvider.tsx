@@ -27,6 +27,7 @@ export interface ToastInput {
   message?: string;
   variant?: ToastVariant;
   duration?: number;
+  txHash?: string;
 }
 
 interface ToastContextValue {
@@ -71,8 +72,32 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
       setToasts((prev) => {
         const next = [...prev, toast];
-        return next.length > MAX_TOASTS ? next.slice(next.length - MAX_TOASTS) : next;
+        return next.length > MAX_TOASTS
+          ? next.slice(next.length - MAX_TOASTS)
+          : next;
       });
+
+      // Push to notification history for persistence
+      if (typeof window !== "undefined") {
+        const notifBridge = (
+          window as unknown as {
+            __soropadNotifications?: {
+              add: (n: {
+                title: string;
+                message?: string;
+                variant?: ToastVariant;
+                txHash?: string;
+              }) => string;
+            };
+          }
+        ).__soropadNotifications;
+        notifBridge?.add({
+          title: input.title,
+          message: input.message,
+          variant: input.variant,
+          txHash: input.txHash,
+        });
+      }
 
       if (toast.duration > 0) {
         const timer = setTimeout(() => dismiss(id), toast.duration);
@@ -159,9 +184,17 @@ function ToastViewport({
 
 const variantStyles: Record<
   ToastVariant,
-  { border: string; icon: React.ComponentType<{ className?: string }>; iconColor: string }
+  {
+    border: string;
+    icon: React.ComponentType<{ className?: string }>;
+    iconColor: string;
+  }
 > = {
-  info: { border: "border-blue-500/30", icon: Info, iconColor: "text-blue-400" },
+  info: {
+    border: "border-blue-500/30",
+    icon: Info,
+    iconColor: "text-blue-400",
+  },
   success: {
     border: "border-emerald-500/30",
     icon: CheckCircle2,
@@ -172,7 +205,11 @@ const variantStyles: Record<
     icon: AlertTriangle,
     iconColor: "text-yellow-400",
   },
-  error: { border: "border-red-500/30", icon: XCircle, iconColor: "text-red-400" },
+  error: {
+    border: "border-red-500/30",
+    icon: XCircle,
+    iconColor: "text-red-400",
+  },
 };
 
 function ToastItem({

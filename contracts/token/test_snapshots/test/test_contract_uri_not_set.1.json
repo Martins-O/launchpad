@@ -268,7 +268,8 @@
                 },
                 {
                   "bool": false
-                }
+                },
+                "void"
               ]
             }
           }
@@ -380,7 +381,7 @@
               }
             ],
             "data": {
-              "string": "caught panic 'contract URI not set' from contract function 'Symbol(obj#71)'"
+              "string": "caught panic 'contract URI not set' from contract function 'Symbol(obj#75)'"
             }
           }
         }

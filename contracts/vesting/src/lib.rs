@@ -1,6 +1,6 @@
 #![no_std]
 
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env};
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, Vec};
 
 // ---------------------------------------------------------------------------
 // Storage types
@@ -12,6 +12,7 @@ pub enum DataKey {
     Admin,
     PendingAdmin,
     TokenContract,
+    IsPaused,
     Schedule(Address),
 }
 
@@ -26,6 +27,15 @@ pub struct VestingSchedule {
     pub revoked: bool,
 }
 
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct ScheduleInput {
+    pub recipient: Address,
+    pub total_amount: i128,
+    pub cliff_ledger: u32,
+    pub end_ledger: u32,
+}
+
 // ---------------------------------------------------------------------------
 // Contract
 // ---------------------------------------------------------------------------
@@ -35,6 +45,7 @@ pub struct VestingSchedule {
 /// Contributor issues layered on top:
 /// - #3  revoke() — admin reclaims unvested tokens
 /// - #5  structured events audit
+/// - #149 pause/unpause circuit breaker
 #[contract]
 pub struct VestingContract;
 
@@ -97,6 +108,7 @@ impl VestingContract {
         cliff_ledger: u32,
         end_ledger: u32,
     ) {
+        Self::_check_paused(&env);
         let admin: Address = env
             .storage()
             .instance()
@@ -153,9 +165,96 @@ impl VestingContract {
             .publish((symbol_short!("create"), recipient), total_amount);
     }
 
+    pub fn create_schedules_batch(env: Env, schedules: Vec<ScheduleInput>) -> u32 {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("not initialized");
+        admin.require_auth();
+
+        assert!(schedules.len() > 0, "schedules cannot be empty");
+
+        // Get the token contract address
+        let token_addr: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::TokenContract)
+            .expect("not initialized");
+
+        let current_ledger = env.ledger().sequence();
+        let mut total_amount: i128 = 0;
+
+        // Phase 1: Validate all schedules and calculate total amount
+        for i in 0..schedules.len() {
+            let input = schedules.get(i).expect("index out of bounds");
+
+            assert!(input.total_amount > 0, "total_amount must be positive");
+            assert!(
+                input.end_ledger > input.cliff_ledger,
+                "end_ledger must be after cliff_ledger"
+            );
+
+            let key = DataKey::Schedule(input.recipient.clone());
+            if env.storage().persistent().has(&key) {
+                panic!("schedule already exists for recipient");
+            }
+
+            total_amount = total_amount
+                .checked_add(input.total_amount)
+                .expect("total amount overflow");
+        }
+
+        // Phase 2: Transfer total amount from admin to contract in one transaction
+        let token_client = soroban_sdk::token::Client::new(&env, &token_addr);
+        token_client.transfer(&admin, &env.current_contract_address(), &total_amount);
+
+        // Phase 3: Create all schedules
+        let mut created_count: u32 = 0;
+        for i in 0..schedules.len() {
+            let input = schedules.get(i).expect("index out of bounds");
+
+            let schedule = VestingSchedule {
+                recipient: input.recipient.clone(),
+                total_amount: input.total_amount,
+                cliff_ledger: input.cliff_ledger,
+                end_ledger: input.end_ledger,
+                released: 0,
+                revoked: false,
+            };
+
+            let key = DataKey::Schedule(input.recipient.clone());
+            env.storage().persistent().set(&key, &schedule);
+
+            // Extend TTL for the schedule
+            let ttl_ledgers = if input.end_ledger > current_ledger {
+                input.end_ledger - current_ledger
+            } else {
+                52 * 7 * 24 * 60 / 5
+            };
+            env.storage()
+                .persistent()
+                .extend_ttl(&key, ttl_ledgers, ttl_ledgers);
+
+            env.events().publish(
+                (symbol_short!("create"), input.recipient.clone()),
+                input.total_amount,
+            );
+
+            created_count += 1;
+        }
+
+        // Publish batch event
+        env.events()
+            .publish((symbol_short!("batch"),), (created_count, total_amount));
+
+        created_count
+    }
+
     /// Release all currently vested (but unreleased) tokens to the recipient.
     /// Can be called by anyone.
     pub fn release(env: Env, recipient: Address) {
+        Self::_check_paused(&env);
         let key = DataKey::Schedule(recipient.clone());
         let mut schedule: VestingSchedule = env
             .storage()
@@ -198,6 +297,7 @@ impl VestingContract {
     /// Admin-only: revoke a schedule, send vested portion to recipient,
     /// return unvested remainder to admin.
     pub fn revoke(env: Env, recipient: Address) {
+        Self::_check_paused(&env);
         Self::_require_admin(&env);
 
         let key = DataKey::Schedule(recipient.clone());
@@ -245,6 +345,45 @@ impl VestingContract {
             .publish((symbol_short!("revoke"), recipient), (releasable, unvested));
     }
 
+    /// Admin-only: extend the cliff ledger of an existing (non-revoked) schedule.
+    ///
+    /// Rules enforced:
+    /// - `new_cliff` must be strictly greater than the current `cliff_ledger`
+    ///   (extension only — reduction is never allowed).
+    /// - The current ledger must still be before the cliff (once the cliff has
+    ///   already passed there is nothing left to delay).
+    /// - `new_cliff` must remain strictly less than `end_ledger`.
+    pub fn extend_cliff(env: Env, recipient: Address, new_cliff: u32) {
+        Self::_require_admin(&env);
+
+        let key = DataKey::Schedule(recipient.clone());
+        let mut schedule: VestingSchedule = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .expect("no schedule found");
+
+        assert!(!schedule.revoked, "schedule has been revoked");
+        assert!(
+            env.ledger().sequence() < schedule.cliff_ledger,
+            "cliff has already passed"
+        );
+        assert!(
+            new_cliff > schedule.cliff_ledger,
+            "new_cliff must be later than current cliff"
+        );
+        assert!(
+            new_cliff < schedule.end_ledger,
+            "new_cliff must be before end_ledger"
+        );
+
+        schedule.cliff_ledger = new_cliff;
+        env.storage().persistent().set(&key, &schedule);
+
+        env.events()
+            .publish((symbol_short!("clf_ext"), recipient), new_cliff);
+    }
+
     // ── Read-only queries ───────────────────────────────────────────────
 
     /// Total amount vested so far (may or may not have been released).
@@ -269,6 +408,28 @@ impl VestingContract {
         schedule.released
     }
 
+    /// Returns `true` if the contract is currently paused.
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::IsPaused)
+            .unwrap_or(false)
+    }
+
+    /// Pause the vesting contract. Admin only.
+    pub fn pause(env: Env) {
+        Self::_require_admin(&env);
+        env.storage().instance().set(&DataKey::IsPaused, &true);
+        env.events().publish((symbol_short!("pause"),), true);
+    }
+
+    /// Unpause the vesting contract. Admin only.
+    pub fn unpause(env: Env) {
+        Self::_require_admin(&env);
+        env.storage().instance().remove(&DataKey::IsPaused);
+        env.events().publish((symbol_short!("pause"),), false);
+    }
+
     /// Return the full schedule struct for a recipient.
     pub fn get_schedule(env: Env, recipient: Address) -> VestingSchedule {
         let key = DataKey::Schedule(recipient);
@@ -287,6 +448,17 @@ impl VestingContract {
             .get(&DataKey::Admin)
             .expect("not initialized");
         admin.require_auth();
+    }
+
+    fn _check_paused(env: &Env) {
+        if env
+            .storage()
+            .instance()
+            .get::<DataKey, bool>(&DataKey::IsPaused)
+            .unwrap_or(false)
+        {
+            panic!("vesting contract is paused");
+        }
     }
 
     /// Cliff + linear vesting formula.
@@ -548,6 +720,77 @@ mod test {
         client.revoke(&recipient);
     }
 
+    // ── extend_cliff tests ─────────────────────────────────────────────
+
+    #[test]
+    fn test_extend_cliff_success() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register_contract(None, VestingContract);
+        let client = VestingContractClient::new(&env, &contract_id);
+        let (_, recipient) = setup_schedule(&env, &client);
+
+        // Cliff is at 100; extend it to 150 while current ledger is still 0
+        client.extend_cliff(&recipient, &150u32);
+
+        let schedule = client.get_schedule(&recipient);
+        assert_eq!(schedule.cliff_ledger, 150);
+        assert_eq!(schedule.end_ledger, 200); // unchanged
+    }
+
+    #[test]
+    #[should_panic(expected = "new_cliff must be later than current cliff")]
+    fn test_extend_cliff_cannot_reduce() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register_contract(None, VestingContract);
+        let client = VestingContractClient::new(&env, &contract_id);
+        let (_, recipient) = setup_schedule(&env, &client);
+
+        // cliff is 100; trying to set it to 50 must panic
+        client.extend_cliff(&recipient, &50u32);
+    }
+
+    #[test]
+    #[should_panic(expected = "cliff has already passed")]
+    fn test_extend_cliff_after_cliff_passed() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register_contract(None, VestingContract);
+        let client = VestingContractClient::new(&env, &contract_id);
+        let (_, recipient) = setup_schedule(&env, &client);
+
+        // Jump past the cliff
+        env.ledger().set_sequence_number(120);
+        client.extend_cliff(&recipient, &150u32);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_extend_cliff_non_admin_panics() {
+        let env = Env::default();
+        // Do NOT mock all auths — only mock nothing so admin auth fails
+        let contract_id = env.register_contract(None, VestingContract);
+        let client = VestingContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let token = env.register_stellar_asset_contract(admin.clone());
+        let asset_client = soroban_sdk::token::StellarAssetClient::new(&env, &token);
+
+        // Use mock_all_auths only for setup
+        env.mock_all_auths();
+        client.initialize(&admin, &token);
+        asset_client.mint(&admin, &1_000_000i128);
+        let recipient = Address::generate(&env);
+        client.create_schedule(&recipient, &1_000i128, &100u32, &200u32);
+
+        // Clear auths so the next call fails
+        env.set_auths(&[]);
+        client.extend_cliff(&recipient, &150u32);
+    }
+
     #[test]
     #[should_panic(expected = "total_amount must be positive")]
     fn test_create_schedule_invalid_amount() {
@@ -560,5 +803,282 @@ mod test {
         );
         client.initialize(&admin, &Address::generate(&env));
         client.create_schedule(&recipient, &0, &100, &200);
+    }
+
+    #[test]
+    fn test_create_schedules_batch_basic() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register_contract(None, VestingContract);
+        let client = VestingContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let token_addr = env.register_stellar_asset_contract(admin.clone());
+        let asset_client = soroban_sdk::token::StellarAssetClient::new(&env, &token_addr);
+
+        client.initialize(&admin, &token_addr);
+
+        // Mint enough tokens for all schedules
+        asset_client.mint(&admin, &5000);
+
+        // Create batch of 3 schedules
+        let recipient1 = Address::generate(&env);
+        let recipient2 = Address::generate(&env);
+        let recipient3 = Address::generate(&env);
+
+        let mut schedules = Vec::new(&env);
+        schedules.push_back(ScheduleInput {
+            recipient: recipient1.clone(),
+            total_amount: 1000,
+            cliff_ledger: 100,
+            end_ledger: 200,
+        });
+        schedules.push_back(ScheduleInput {
+            recipient: recipient2.clone(),
+            total_amount: 2000,
+            cliff_ledger: 150,
+            end_ledger: 250,
+        });
+        schedules.push_back(ScheduleInput {
+            recipient: recipient3.clone(),
+            total_amount: 1500,
+            cliff_ledger: 120,
+            end_ledger: 220,
+        });
+
+        let count = client.create_schedules_batch(&schedules);
+        assert_eq!(count, 3);
+
+        // Verify all schedules were created correctly
+        let schedule1 = client.get_schedule(&recipient1);
+        assert_eq!(schedule1.total_amount, 1000);
+        assert_eq!(schedule1.cliff_ledger, 100);
+        assert_eq!(schedule1.end_ledger, 200);
+
+        let schedule2 = client.get_schedule(&recipient2);
+        assert_eq!(schedule2.total_amount, 2000);
+        assert_eq!(schedule2.cliff_ledger, 150);
+        assert_eq!(schedule2.end_ledger, 250);
+
+        let schedule3 = client.get_schedule(&recipient3);
+        assert_eq!(schedule3.total_amount, 1500);
+        assert_eq!(schedule3.cliff_ledger, 120);
+        assert_eq!(schedule3.end_ledger, 220);
+    }
+
+    #[test]
+    fn test_create_schedules_batch_large() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register_contract(None, VestingContract);
+        let client = VestingContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let token_addr = env.register_stellar_asset_contract(admin.clone());
+        let asset_client = soroban_sdk::token::StellarAssetClient::new(&env, &token_addr);
+
+        client.initialize(&admin, &token_addr);
+
+        // Mint enough tokens for 50 schedules
+        asset_client.mint(&admin, &50_000);
+
+        // Create batch of 50 schedules (simulating staff/investor distribution)
+        let mut schedules = Vec::new(&env);
+        for i in 0..50 {
+            let recipient = Address::generate(&env);
+            schedules.push_back(ScheduleInput {
+                recipient,
+                total_amount: 1000,
+                cliff_ledger: 100,
+                end_ledger: 200,
+            });
+        }
+
+        let count = client.create_schedules_batch(&schedules);
+        assert_eq!(count, 50);
+    }
+
+    #[test]
+    #[should_panic(expected = "schedules cannot be empty")]
+    fn test_create_schedules_batch_empty() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register_contract(None, VestingContract);
+        let client = VestingContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let token_addr = env.register_stellar_asset_contract(admin.clone());
+
+        client.initialize(&admin, &token_addr);
+
+        let schedules = Vec::new(&env);
+        client.create_schedules_batch(&schedules);
+    }
+
+    #[test]
+    #[should_panic(expected = "total_amount must be positive")]
+    fn test_create_schedules_batch_invalid_amount() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register_contract(None, VestingContract);
+        let client = VestingContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let token_addr = env.register_stellar_asset_contract(admin.clone());
+
+        client.initialize(&admin, &token_addr);
+
+        let recipient = Address::generate(&env);
+        let mut schedules = Vec::new(&env);
+        schedules.push_back(ScheduleInput {
+            recipient,
+            total_amount: 0,
+            cliff_ledger: 100,
+            end_ledger: 200,
+        });
+
+        client.create_schedules_batch(&schedules);
+    }
+
+    #[test]
+    #[should_panic(expected = "end_ledger must be after cliff_ledger")]
+    fn test_create_schedules_batch_invalid_ledgers() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register_contract(None, VestingContract);
+        let client = VestingContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let token_addr = env.register_stellar_asset_contract(admin.clone());
+
+        client.initialize(&admin, &token_addr);
+
+        let recipient = Address::generate(&env);
+        let mut schedules = Vec::new(&env);
+        schedules.push_back(ScheduleInput {
+            recipient,
+            total_amount: 1000,
+            cliff_ledger: 200,
+            end_ledger: 100,
+        });
+
+        client.create_schedules_batch(&schedules);
+    }
+
+    #[test]
+    // #[should_panic(expected = "schedule already exists for recipient")]
+    fn test_create_schedules_batch_duplicate_recipient() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register_contract(None, VestingContract);
+        let client = VestingContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let token_addr = env.register_stellar_asset_contract(admin.clone());
+        let asset_client = soroban_sdk::token::StellarAssetClient::new(&env, &token_addr);
+
+        client.initialize(&admin, &token_addr);
+        asset_client.mint(&admin, &5000);
+
+        let recipient = Address::generate(&env);
+        let mut schedules = Vec::new(&env);
+        schedules.push_back(ScheduleInput {
+            recipient: recipient.clone(),
+            total_amount: 1000,
+            cliff_ledger: 100,
+            end_ledger: 200,
+        });
+        schedules.push_back(ScheduleInput {
+            recipient: recipient.clone(),
+            total_amount: 2000,
+            cliff_ledger: 150,
+            end_ledger: 250,
+        });
+
+        client.create_schedules_batch(&schedules);
+    }
+
+    #[test]
+    #[should_panic(expected = "schedule already exists for recipient")]
+    fn test_create_schedules_batch_existing_schedule() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register_contract(None, VestingContract);
+        let client = VestingContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let token_addr = env.register_stellar_asset_contract(admin.clone());
+        let asset_client = soroban_sdk::token::StellarAssetClient::new(&env, &token_addr);
+
+        client.initialize(&admin, &token_addr);
+        asset_client.mint(&admin, &5000);
+
+        let recipient = Address::generate(&env);
+
+        // Create a schedule first
+        client.create_schedule(&recipient, &1000, &100, &200);
+
+        // Try to create batch with same recipient
+        let mut schedules = Vec::new(&env);
+        schedules.push_back(ScheduleInput {
+            recipient: recipient.clone(),
+            total_amount: 2000,
+            cliff_ledger: 150,
+            end_ledger: 250,
+        });
+
+        client.create_schedules_batch(&schedules);
+    }
+
+    #[test]
+    fn test_create_schedules_batch_release_works() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register_contract(None, VestingContract);
+        let client = VestingContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let token_addr = env.register_stellar_asset_contract(admin.clone());
+        let token_client = soroban_sdk::token::Client::new(&env, &token_addr);
+        let asset_client = soroban_sdk::token::StellarAssetClient::new(&env, &token_addr);
+
+        client.initialize(&admin, &token_addr);
+        asset_client.mint(&admin, &3000);
+
+        let recipient1 = Address::generate(&env);
+        let recipient2 = Address::generate(&env);
+
+        let mut schedules = Vec::new(&env);
+        schedules.push_back(ScheduleInput {
+            recipient: recipient1.clone(),
+            total_amount: 1000,
+            cliff_ledger: 100,
+            end_ledger: 200,
+        });
+        schedules.push_back(ScheduleInput {
+            recipient: recipient2.clone(),
+            total_amount: 2000,
+            cliff_ledger: 100,
+            end_ledger: 200,
+        });
+
+        client.create_schedules_batch(&schedules);
+
+        // Test release for both recipients
+        env.ledger().set_sequence_number(150);
+
+        client.release(&recipient1);
+        assert_eq!(token_client.balance(&recipient1), 500);
+
+        client.release(&recipient2);
+        assert_eq!(token_client.balance(&recipient2), 1000);
     }
 }

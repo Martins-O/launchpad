@@ -268,7 +268,8 @@
                 },
                 {
                   "bool": false
-                }
+                },
+                "void"
               ]
             }
           }
@@ -387,7 +388,8 @@
                 },
                 {
                   "bool": false
-                }
+                },
+                "void"
               ]
             }
           }
@@ -410,7 +412,7 @@
             "data": {
               "vec": [
                 {
-                  "string": "caught panic 'already initialized' from contract function 'Symbol(obj#75)'"
+                  "string": "caught panic 'already initialized' from contract function 'Symbol(obj#79)'"
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
@@ -436,7 +438,8 @@
                 },
                 {
                   "bool": false
-                }
+                },
+                "void"
               ]
             }
           }
@@ -520,7 +523,8 @@
                     },
                     {
                       "bool": false
-                    }
+                    },
+                    "void"
                   ]
                 }
               ]

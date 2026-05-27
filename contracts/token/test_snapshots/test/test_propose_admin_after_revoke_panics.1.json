@@ -316,7 +316,8 @@
                 },
                 {
                   "bool": false
-                }
+                },
+                "void"
               ]
             }
           }
@@ -497,7 +498,7 @@
             "data": {
               "vec": [
                 {
-                  "string": "caught panic 'admin revoked: contract is locked' from contract function 'Symbol(obj#127)'"
+                  "string": "caught panic 'admin revoked: contract is locked' from contract function 'Symbol(obj#131)'"
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"

@@ -5,6 +5,7 @@ import { useNetwork } from "../providers/NetworkProvider";
 import { WalletButton } from "./WalletButton";
 import { SettingsModal } from "./SettingsModal";
 import { LanguageSwitcher } from "./LanguageSwitcher";
+// import { NotificationCenter } from "./NotificationCenter";
 import { Globe, ChevronDown, Menu, X } from "lucide-react";
 import { useState } from "react";
 
@@ -53,21 +54,24 @@ export function Navbar() {
         </div>
 
         {/* Right side — wallet, settings & network */}
-        <div className="flex items-center gap-3">
-          <LanguageSwitcher />
-          <NetworkSwitcher />
+        <div className="flex items-center gap-2 md:gap-3">
+          {/* Desktop-only controls */}
+          <div className="hidden items-center gap-2 md:flex md:gap-3">
+            <LanguageSwitcher />
+            <NetworkSwitcher />
+            <SettingsModal />
+          </div>
 
-          {/* Custom RPC / Horizon settings */}
-          <SettingsModal />
-
-          {/* Wallet connect / disconnect */}
+          {/* Wallet connect — visible on all screens */}
           <WalletButton />
 
           {/* Mobile menu toggle */}
           <button
             onClick={() => setMobileMenuOpen((prev) => !prev)}
-            className="ml-1 rounded-lg border border-white/10 bg-white/5 p-1.5 text-gray-400 transition-colors hover:bg-white/10 hover:text-white md:hidden"
+            className="rounded-lg border border-white/10 bg-white/5 p-1.5 text-gray-400 transition-colors hover:bg-white/10 hover:text-white md:hidden"
             aria-label={mobileMenuOpen ? "Close menu" : "Open menu"}
+            aria-expanded={mobileMenuOpen}
+            aria-controls="mobile-menu"
           >
             {mobileMenuOpen ? (
               <X className="h-5 w-5" />
@@ -80,8 +84,12 @@ export function Navbar() {
 
       {/* Mobile nav drawer */}
       {mobileMenuOpen && (
-        <div className="border-t border-white/5 bg-void-900/95 backdrop-blur-lg md:hidden">
+        <div
+          id="mobile-menu"
+          className="border-t border-white/5 bg-void-900/95 backdrop-blur-lg md:hidden"
+        >
           <div className="flex flex-col gap-1 px-6 py-4">
+            {/* Navigation links */}
             {navLinks.map((link) => (
               <Link
                 key={link.href}
@@ -92,6 +100,25 @@ export function Navbar() {
                 {link.label}
               </Link>
             ))}
+
+            {/* Divider */}
+            <div className="my-2 border-t border-white/5" />
+
+            {/* Mobile controls */}
+            <div className="flex flex-col gap-3 px-3 py-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-gray-500">Language</span>
+                <LanguageSwitcher />
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-gray-500">Network</span>
+                <NetworkSwitcher />
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-gray-500">Settings</span>
+                <SettingsModal />
+              </div>
+            </div>
           </div>
         </div>
       )}
