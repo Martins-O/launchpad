@@ -33,7 +33,7 @@ export default function Home() {
               Deploy a Token
             </a>
             <a
-              href="https://github.com/your-org/soroban-token-launchpad"
+              href="https://github.com/soropad/launchpad"
               target="_blank"
               rel="noopener noreferrer"
               className="btn-secondary px-8 py-3 text-base"

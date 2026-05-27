@@ -3,10 +3,13 @@ export async function initAxe(): Promise<void> {
     typeof window !== "undefined" &&
     process.env.NODE_ENV === "development"
   ) {
-    const React = await import("react");
-    const ReactDOM = await import("react-dom");
-    const axe = await import("@axe-core/react");
-
-    axe.default(React, ReactDOM, 1000);
+    // React ES modules are read-only namespace objects in modern bundlers.
+    // @axe-core/react attempts to modify React.createElement, causing a TypeError
+    // and leading to continuous Fast Refresh reloads in Next.js.
+    // 
+    // const React = await import("react");
+    // const ReactDOM = await import("react-dom");
+    // const axe = await import("@axe-core/react");
+    // axe.default(React, ReactDOM, 1000);
   }
 }

@@ -7,8 +7,13 @@ import {
   useMemo,
   useCallback,
   type ReactNode,
+  useEffect,
 } from "react";
-import { type NetworkConfig, type NetworkType, NETWORKS } from "../../types/network";
+import {
+  type NetworkConfig,
+  type NetworkType,
+  NETWORKS,
+} from "../../types/network";
 
 interface NetworkContextValue {
   networkConfig: NetworkConfig;
@@ -17,16 +22,21 @@ interface NetworkContextValue {
   mounted: boolean;
 }
 
-const NetworkContext = createContext<NetworkContextValue | undefined>(undefined);
+const NetworkContext = createContext<NetworkContextValue | undefined>(
+  undefined,
+);
 
 export function NetworkProvider({ children }: { children: ReactNode }) {
-  const [network, setNetworkState] = useState<NetworkType>(() => {
-    if (typeof window === "undefined") return "testnet";
+  const [network, setNetworkState] = useState<NetworkType>("testnet");
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
     const saved = localStorage.getItem("soropad:network") as NetworkType | null;
-    if (saved === "testnet" || saved === "mainnet") return saved;
-    return "testnet";
-  });
-  const mounted = true;
+    if (saved === "testnet" || saved === "mainnet") {
+      setNetworkState(saved);
+    }
+    setMounted(true);
+  }, []);
 
   const setNetwork = useCallback((n: NetworkType) => {
     setNetworkState(n);
@@ -42,7 +52,7 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
       setNetwork,
       mounted,
     }),
-    [networkConfig, network, setNetwork, mounted]
+    [networkConfig, network, setNetwork, mounted],
   );
 
   return (
