@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { useWallet } from "@/app/hooks/useWallet";
 import { useSoroban } from "@/hooks/useSoroban";
+import { useToast } from "@/app/providers/ToastProvider";
 // import {
 //     addressToScVal,
 //     i128ToScVal
@@ -56,6 +57,7 @@ export function UserPanel({ contractId, decimals }: UserPanelProps) {
     submitTransaction,
     networkConfig,
   } = useSoroban();
+  const toast = useToast();
 
   const [loading, setLoading] = useState<string | null>(null);
   const [lastTxHash, setLastTxHash] = useState<string | null>(null);
@@ -129,7 +131,11 @@ export function UserPanel({ contractId, decimals }: UserPanelProps) {
     } catch (err) {
       const error = err as Error;
       console.error(`burn failed:`, error);
-      alert(`Burn failed: ${error.message}`);
+      toast.show({
+        title: "Burn failed",
+        message: error.message,
+        variant: "error",
+      });
     } finally {
       setLoading(null);
     }
@@ -153,7 +159,7 @@ export function UserPanel({ contractId, decimals }: UserPanelProps) {
         </div>
         {lastTxHash && (
           <a
-            href={`https://stellar.expert/explorer/futurenet/tx/${lastTxHash}`}
+            href={`https://stellar.expert/explorer/${networkConfig.network}/tx/${lastTxHash}`}
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-1.5 text-xs text-stellar-400 hover:text-stellar-300 transition-colors bg-stellar-400/10 px-3 py-1.5 rounded-full border border-stellar-400/20"

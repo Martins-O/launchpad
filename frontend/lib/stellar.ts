@@ -502,6 +502,13 @@ export async function fetchTopHolders(
   limit = 10,
 ): Promise<TokenHolder[]> {
   try {
+    // Soroban-native token contracts do not have a Horizon asset issuer.
+    // Returning an empty list here avoids accidentally mixing in holders
+    // from an unrelated wrapped asset that happens to share the same symbol.
+    if (contractId.startsWith("C")) {
+      return [];
+    }
+
     const horizon = new StellarSdk.Horizon.Server(config.horizonUrl);
     const symbol =
       symbolHint ??

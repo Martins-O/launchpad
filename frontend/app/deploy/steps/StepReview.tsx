@@ -114,6 +114,24 @@ function FriendbotBanner({ threshold = 100 }: { threshold?: number }) {
     const [balance, setBalance] = useState<number | null>(null);
     const [loading, setLoading] = useState(false);
 
+    const showErrorToast = (message: string) => {
+        if (typeof window !== "undefined") {
+            const bridge = (window as unknown as {
+                __soropadToast?: { show: (t: { title: string; message?: string; variant?: "info" | "success" | "warning" | "error" }) => string };
+            }).__soropadToast;
+            if (bridge) {
+                bridge.show({
+                    title: "Friendbot funding failed",
+                    message,
+                    variant: "error",
+                });
+                return;
+            }
+        }
+
+        console.error(message);
+    };
+
     useEffect(() => {
         let cancelled = false;
         if (!publicKey) return;
@@ -150,9 +168,8 @@ function FriendbotBanner({ threshold = 100 }: { threshold?: number }) {
             const native = account.balances.find((b) => b.asset_type === "native");
             setBalance(native ? Number(native.balance) : 0);
         } catch (err) {
-            // swallow — show simple feedback
-            console.error(err);
-            alert("Friendbot funding failed. See console for details.");
+            const message = err instanceof Error ? err.message : "See console for details.";
+            showErrorToast(message);
         } finally {
             setLoading(false);
         }
