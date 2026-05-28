@@ -91,6 +91,7 @@ async function fetchEventsFromRpc(
   try {
     const response = await rpc.getEvents({
       filters,
+      cursor: cursor ?? "",
       startLedger,
       limit,
     });
