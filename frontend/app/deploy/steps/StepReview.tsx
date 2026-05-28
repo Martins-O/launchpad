@@ -2,7 +2,6 @@ import { Control, useWatch } from "react-hook-form";
 import { DeployFormData } from "../DeployForm";
 import { useWallet } from "@/app/hooks/useWallet";
 import { useNetwork } from "@/app/providers/NetworkProvider";
-import { useToast } from "@/app/providers/ToastProvider";
 import * as StellarSdk from "@stellar/stellar-sdk";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/Button";
@@ -112,9 +111,26 @@ export const StepReview = ({ control }: StepProps) => {
 function FriendbotBanner({ threshold = 100 }: { threshold?: number }) {
     const { publicKey } = useWallet();
     const { networkConfig } = useNetwork();
-    const toast = useToast();
     const [balance, setBalance] = useState<number | null>(null);
     const [loading, setLoading] = useState(false);
+
+    const showErrorToast = (message: string) => {
+        if (typeof window !== "undefined") {
+            const bridge = (window as unknown as {
+                __soropadToast?: { show: (t: { title: string; message?: string; variant?: "info" | "success" | "warning" | "error" }) => string };
+            }).__soropadToast;
+            if (bridge) {
+                bridge.show({
+                    title: "Friendbot funding failed",
+                    message,
+                    variant: "error",
+                });
+                return;
+            }
+        }
+
+        console.error(message);
+    };
 
     useEffect(() => {
         let cancelled = false;
@@ -152,12 +168,8 @@ function FriendbotBanner({ threshold = 100 }: { threshold?: number }) {
             const native = account.balances.find((b) => b.asset_type === "native");
             setBalance(native ? Number(native.balance) : 0);
         } catch (err) {
-            console.error(err);
-            toast.show({
-                title: "Friendbot funding failed",
-                message: "See console for details.",
-                variant: "error",
-            });
+            const message = err instanceof Error ? err.message : "See console for details.";
+            showErrorToast(message);
         } finally {
             setLoading(false);
         }
