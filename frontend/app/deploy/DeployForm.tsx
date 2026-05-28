@@ -76,6 +76,7 @@ export default function DeployForm() {
     errors: string[];
     warnings: string[];
   } | null>(null);
+  const [cooldownRemainingMs, setCooldownRemainingMs] = useState(0);
 
   const router = useRouter();
   const { publicKey } = useWallet();
@@ -278,9 +279,8 @@ export default function DeployForm() {
       try {
         const last = Number(localStorage.getItem(key) || 0);
         const remaining = Math.max(0, last ? last + COOLDOWN_MS - Date.now() : 0);
-        // Could be used to display cooldown in UI
-        if (mounted && remaining > 0) {
-          console.log(`Cooldown remaining: ${Math.ceil(remaining / 1000)}s`);
+        if (mounted) {
+          setCooldownRemainingMs(remaining);
         }
       } catch {
         // ignore
@@ -294,6 +294,9 @@ export default function DeployForm() {
       clearInterval(id);
     };
   }, [publicKey, COOLDOWN_MS]);
+
+  const isCooldownActive = cooldownRemainingMs > 0;
+  const cooldownSeconds = Math.ceil(cooldownRemainingMs / 1000);
 
   return (
     <div className="w-full max-w-xl mx-auto">
@@ -430,13 +433,14 @@ export default function DeployForm() {
                 disabled={
                   !isValid ||
                   isDeploying ||
-                  !(preflightResult?.success ?? false)
+                  !(preflightResult?.success ?? false) ||
+                  isCooldownActive
                 }
                 isLoading={isDeploying}
                 className="px-8 py-2"
               >
                 <Rocket className="w-4 h-4" />
-                Deploy Token
+                {isCooldownActive ? `Cooldown: ${cooldownSeconds}s` : "Deploy Token"}
               </Button>
             </div>
           )}

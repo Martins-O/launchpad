@@ -1,4 +1,5 @@
 import { type NetworkConfig } from "../types/network";
+import * as StellarSdk from "@stellar/stellar-sdk";
 
 const DEFAULT_MERCURY_BASE_URL_TESTNET =
   process.env.NEXT_PUBLIC_MERCURY_TESTNET_URL ??
@@ -41,6 +42,97 @@ export function getMercuryConfig(
   return { baseUrl, token };
 }
 
+/**
+ * Fetch events using Soroban RPC's native getEvents endpoint as a fallback
+ * when Mercury indexer is not configured.
+ */
+async function fetchEventsFromRpc(
+  contractId: string,
+  config: NetworkConfig,
+  options: {
+    topics?: string[];
+    cursor?: string;
+    limit?: number;
+  } = {},
+): Promise<FetchIndexedEventsResult> {
+  const { topics, cursor, limit = 200 } = options;
+  
+  const rpc = new StellarSdk.rpc.Server(config.rpcUrl);
+
+  // Build filters for Soroban RPC getEvents
+  const filters: StellarSdk.rpc.Api.EventFilter[] = [];
+
+  if (topics && topics.length > 0) {
+    for (const topic of topics) {
+      filters.push({
+        contractIds: [contractId],
+        topics: [[topic]],
+      });
+    }
+  } else {
+    filters.push({
+      contractIds: [contractId],
+    });
+  }
+
+  // Parse cursor (format: "ledger-<sequence>") to derive startLedger.
+  // GetEventsRequest uses a discriminated union: either startLedger OR cursor, never both.
+  let startLedger: number | undefined;
+  if (cursor) {
+    const cursorParts = cursor.split("-");
+    if (cursorParts.length === 2) {
+      const parsed = parseInt(cursorParts[1], 10);
+      if (!isNaN(parsed)) {
+        startLedger = parsed;
+      }
+    }
+  }
+
+  // Fall back to latest ledger when no startLedger could be derived.
+  if (startLedger === undefined) {
+    const ledgerInfo = await rpc.getLatestLedger();
+    startLedger = Math.max(1, ledgerInfo.sequence - 1000);
+  }
+
+  try {
+    const response = await rpc.getEvents({
+      filters,
+      startLedger,
+      limit,
+    });
+
+    const events: IndexedEvent[] = response.events.map((event) => {
+      // Convert Soroban RPC event format to IndexedEvent format
+      const topicStrings = event.topic.map((t) => 
+        t.toXDR("base64")
+      );
+      
+      return {
+        id: event.id,
+        ledger: event.ledger,
+        tx_hash: event.txHash || "",
+        timestamp: new Date(event.ledgerClosedAt || 0).toISOString(),
+        topic: topicStrings,
+        value: event.value?.toXDR("base64") ?? null,
+      };
+    });
+
+    // Determine next cursor from the last event's ledger
+    let nextCursor: string | null = null;
+    if (events.length > 0) {
+      const lastEvent = events[events.length - 1];
+      nextCursor = `ledger-${lastEvent.ledger}`;
+    }
+
+    return { events, nextCursor };
+  } catch (error) {
+    console.error("Soroban RPC getEvents failed:", error);
+    throw new Error(
+      `Failed to fetch events from Soroban RPC: ${error instanceof Error ? error.message : "Unknown error"}`
+    );
+  }
+}
+
 export async function fetchIndexedEvents(
   contractId: string,
   config: NetworkConfig,
@@ -51,10 +143,13 @@ export async function fetchIndexedEvents(
   } = {},
 ): Promise<FetchIndexedEventsResult> {
   const mercury = getMercuryConfig(config);
+  
+  // If Mercury is not configured, use Soroban RPC fallback
   if (!mercury) {
-    throw new Error(
-      "Mercury indexer not configured. Set NEXT_PUBLIC_MERCURY_AUTH_TOKEN.",
+    console.log(
+      "Mercury indexer not configured. Using Soroban RPC fallback (history may be limited to recent ledgers)."
     );
+    return fetchEventsFromRpc(contractId, config, options);
   }
 
   const { topics, cursor, limit = 200 } = options;
