@@ -58,16 +58,15 @@ async function fetchEventsFromRpc(
   const { topics, cursor, limit = 200 } = options;
   
   const rpc = new StellarSdk.rpc.Server(config.rpcUrl);
-  
+
   // Build filters for Soroban RPC getEvents
-  const filters: StellarSdk.rpc.EventFilter[] = [];
-  
+  const filters: StellarSdk.rpc.Api.EventFilter[] = [];
+
   if (topics && topics.length > 0) {
-    // Convert base64 topic strings to the format expected by Soroban RPC
     for (const topic of topics) {
       filters.push({
         contractIds: [contractId],
-        topics: [[topic]], // Soroban RPC expects nested arrays for topic matching
+        topics: [[topic]],
       });
     }
   } else {
@@ -76,7 +75,8 @@ async function fetchEventsFromRpc(
     });
   }
 
-  // Parse cursor if it exists (format: "ledger-sequence")
+  // Parse cursor (format: "ledger-<sequence>") to derive startLedger.
+  // GetEventsRequest uses a discriminated union: either startLedger OR cursor, never both.
   let startLedger: number | undefined;
   if (cursor) {
     const cursorParts = cursor.split("-");
@@ -88,10 +88,15 @@ async function fetchEventsFromRpc(
     }
   }
 
+  // Fall back to latest ledger when no startLedger could be derived.
+  if (startLedger === undefined) {
+    const ledgerInfo = await rpc.getLatestLedger();
+    startLedger = Math.max(1, ledgerInfo.sequence - 1000);
+  }
+
   try {
     const response = await rpc.getEvents({
       filters,
-      cursor: cursor ?? "",
       startLedger,
       limit,
     });
