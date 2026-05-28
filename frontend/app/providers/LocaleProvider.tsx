@@ -1,13 +1,11 @@
 "use client";
 
-import {
-  createContext,
-  useContext,
-  useState,
-  useEffect,
-  ReactNode,
-} from "react";
+import { createContext, useContext, useEffect, useState, ReactNode } from "react";
 import { AbstractIntlMessages } from "next-intl";
+import enMessages from "../../messages/en.json";
+import esMessages from "../../messages/es.json";
+import frMessages from "../../messages/fr.json";
+import zhMessages from "../../messages/zh.json";
 
 type Locale = "en" | "es" | "fr" | "zh";
 
@@ -21,11 +19,16 @@ const SUPPORTED_LOCALES: Locale[] = ["en", "es", "fr", "zh"];
 
 const STORAGE_KEY = "soropad:locale";
 
-const defaultMessages: AbstractIntlMessages = {};
+const MESSAGE_MAP: Record<Locale, AbstractIntlMessages> = {
+  en: enMessages,
+  es: esMessages,
+  fr: frMessages,
+  zh: zhMessages,
+};
 
 const LocaleContext = createContext<LocaleContextType>({
   locale: "en",
-  messages: defaultMessages,
+  messages: MESSAGE_MAP.en,
   setLocale: () => {},
 });
 
@@ -44,47 +47,25 @@ function getInitialLocale(): Locale {
   return "en";
 }
 
-async function loadMessages(locale: Locale): Promise<AbstractIntlMessages> {
-  switch (locale) {
-    case "es":
-      return (await import("../../messages/es.json")).default;
-    case "fr":
-      return (await import("../../messages/fr.json")).default;
-    case "zh":
-      return (await import("../../messages/zh.json")).default;
-    default:
-      return (await import("../../messages/en.json")).default;
-  }
-}
-
 interface LocaleProviderProps {
   children: ReactNode;
 }
 
 export function LocaleProvider({ children }: LocaleProviderProps) {
   const [locale, setLocaleState] = useState<Locale>("en");
-  const [messages, setMessages] = useState<AbstractIntlMessages>(defaultMessages);
-  const [isLoaded, setIsLoaded] = useState(false);
+  const [messages, setMessages] = useState<AbstractIntlMessages>(MESSAGE_MAP.en);
 
   useEffect(() => {
-    const initialLocale = getInitialLocale();
-     
-    setLocaleState(initialLocale);
-    loadMessages(initialLocale).then((msgs) => {
-      setMessages(msgs);
-      setIsLoaded(true);
-    });
+    const storedLocale = getInitialLocale();
+    if (storedLocale !== "en") {
+      setLocaleState(storedLocale);
+      setMessages(MESSAGE_MAP[storedLocale]);
+    }
   }, []);
-
-  useEffect(() => {
-    if (!isLoaded) return;
-    loadMessages(locale).then((msgs) => {
-      setMessages(msgs);
-    });
-  }, [locale, isLoaded]);
 
   const setLocale = (newLocale: Locale) => {
     setLocaleState(newLocale);
+    setMessages(MESSAGE_MAP[newLocale]);
     try {
       localStorage.setItem(STORAGE_KEY, newLocale);
     } catch {}

@@ -6,6 +6,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/Button";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 import { PreflightCheckDisplay } from "@/components/ui/PreflightCheck";
@@ -63,14 +64,13 @@ const deploySchema = z
 
 export type DeployFormData = z.infer<typeof deploySchema>;
 
-const STEPS = ["Metadata", "Supply", "Admin", "Review"];
-
 export default function DeployForm() {
   const [currentStep, setCurrentStep] = useState(1);
   const [isDeploying, setIsDeploying] = useState(false);
   const [estimatedFee, setEstimatedFee] = useState<string | null>(null);
   const [feeEstimationLoading, setFeeEstimationLoading] = useState(false);
   const [feeEstimationError, setFeeEstimationError] = useState<string | null>(null);
+  const [announcement, setAnnouncement] = useState("");
   const [preflightResult, setPreflightResult] = useState<{
     isLoading: boolean;
     success: boolean;
@@ -115,6 +115,14 @@ export default function DeployForm() {
       discord: "",
     },
   });
+  const tCommon = useTranslations("common");
+  const tDeploy = useTranslations("deploy");
+  const steps = [
+    tDeploy("steps.metadata"),
+    tDeploy("steps.supply"),
+    tDeploy("steps.admin"),
+    tDeploy("steps.review"),
+  ];
 
   const nextStep = async () => {
     let fieldsToValidate: (keyof DeployFormData)[] = [];
@@ -124,7 +132,7 @@ export default function DeployForm() {
 
     const isStepValid = await trigger(fieldsToValidate);
     if (isStepValid) {
-      const nextStepNum = Math.min(currentStep + 1, STEPS.length);
+      const nextStepNum = Math.min(currentStep + 1, steps.length);
       setCurrentStep(nextStepNum);
       
       if (nextStepNum === 4) {
@@ -177,6 +185,7 @@ export default function DeployForm() {
 
   const onSubmit = async (data: DeployFormData) => {
     setIsDeploying(true);
+    setAnnouncement("Deploying token transaction.");
     setPreflightResult({
       isLoading: true,
       success: false,
@@ -201,6 +210,9 @@ export default function DeployForm() {
         errors: [],
         warnings: [],
       });
+      setAnnouncement(
+        `Token deployed successfully. Transaction hash ${result.transactionHash}.`,
+      );
 
       // Save metadata client-side
       try {
@@ -268,6 +280,9 @@ export default function DeployForm() {
         errors: errorDetails,
         warnings: [],
       });
+      setAnnouncement(
+        `Deployment failed. ${errorDetails.join(" ") || "Please try again."}`,
+      );
 
       console.error("Deployment error:", err);
     } finally {
@@ -306,13 +321,16 @@ export default function DeployForm() {
   return (
     <div className="w-full max-w-xl mx-auto">
       <div className="mb-10">
-        <ProgressBar current={currentStep} total={STEPS.length} />
+        <ProgressBar current={currentStep} total={steps.length} />
       </div>
 
       <form
         onSubmit={handleSubmit(onSubmit)}
         className="glass-card p-8 min-h-[400px] flex flex-col"
       >
+        <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+          {announcement}
+        </p>
         <div className="grow">
           {currentStep === 1 && (
             <StepMetadata register={register} errors={errors} />
@@ -350,7 +368,7 @@ export default function DeployForm() {
               warnings={preflightResult.warnings}
               successMessage={
                 preflightResult.success
-                  ? "Transaction is ready to sign"
+                  ? tDeploy("review.readyMessage")
                   : undefined
               }
               onDismiss={() => setPreflightResult(null)}
@@ -371,12 +389,12 @@ export default function DeployForm() {
             className="px-4 py-2 flex"
           >
             <ArrowLeft className="w-4 h-4" />
-            <p>Back</p>
+            <p>{tCommon("back")}</p>
           </Button>
 
-          {currentStep < STEPS.length ? (
+          {currentStep < steps.length ? (
             <Button type="button" onClick={nextStep} className="px-6 py-2 flex">
-              <p>Continue</p>
+              <p>{tCommon("continue")}</p>
               <ArrowRight className="w-4 h-4" />
             </Button>
           ) : (
@@ -431,7 +449,7 @@ export default function DeployForm() {
                 }
                 className="px-6 py-2"
               >
-                Check
+                {tCommon("check")}
               </Button>
               <Button
                 type="submit"
@@ -445,7 +463,9 @@ export default function DeployForm() {
                 className="px-8 py-2"
               >
                 <Rocket className="w-4 h-4" />
-                {isCooldownActive ? `Cooldown: ${cooldownSeconds}s` : "Deploy Token"}
+                {isCooldownActive
+                  ? `Cooldown: ${cooldownSeconds}s`
+                  : tDeploy("buttons.deployToken")}
               </Button>
             </div>
           )}
@@ -454,7 +474,10 @@ export default function DeployForm() {
 
       <div className="mt-8 text-center">
         <p className="text-xs text-gray-500">
-          Step {currentStep}: {STEPS[currentStep - 1]}
+          {tDeploy("stepIndicator", {
+            current: currentStep,
+            name: steps[currentStep - 1],
+          })}
         </p>
       </div>
     </div>

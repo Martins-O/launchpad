@@ -120,6 +120,16 @@
     "searchPlaceholder": "CABC123...XYZ（合约 ID）",
     "searchLabel": "合约 ID",
     "viewMyAccount": "查看我的账户",
+    "sections": {
+      "contractId": "合约 ID",
+      "tokenDetails": "代币详情",
+      "topHolders": "主要持有人",
+      "vestingSchedule": "归属时间表",
+      "transactionHistory": "交易历史",
+      "tokenActivity": "代币活动",
+      "exportCsv": "导出 CSV",
+      "adminConsole": "管理控制台"
+    },
     "errors": {
       "emptyContract": "请输入合约 ID。",
       "invalidFormat": "无效的合约 ID 格式。应为 56 位 Stellar 地址。"

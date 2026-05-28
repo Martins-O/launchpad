@@ -14,7 +14,12 @@ export function PreflightError({
   if (errors.length === 0) return null;
 
   return (
-    <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4">
+    <div
+      className="rounded-xl border border-red-500/30 bg-red-500/10 p-4"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+    >
       <div className="flex items-start gap-3">
         <AlertCircle className="h-5 w-5 mt-0.5 flex-shrink-0 text-red-400" />
         <div className="flex-1">
@@ -54,7 +59,12 @@ export function PreflightWarning({
   if (warnings.length === 0) return null;
 
   return (
-    <div className="rounded-xl border border-yellow-500/30 bg-yellow-500/10 p-4">
+    <div
+      className="rounded-xl border border-yellow-500/30 bg-yellow-500/10 p-4"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+    >
       <div className="flex items-start gap-3">
         <AlertTriangle className="h-5 w-5 mt-0.5 flex-shrink-0 text-yellow-400" />
         <div className="flex-1">
@@ -92,7 +102,12 @@ export function PreflightSuccess({
   onDismiss?: () => void;
 }) {
   return (
-    <div className="rounded-xl border border-green-500/30 bg-green-500/10 p-4">
+    <div
+      className="rounded-xl border border-green-500/30 bg-green-500/10 p-4"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+    >
       <div className="flex items-center gap-3">
         <CheckCircle className="h-5 w-5 flex-shrink-0 text-green-400" />
         <div className="flex-1">
@@ -121,7 +136,12 @@ export function PreflightLoading({
   message?: string;
 }) {
   return (
-    <div className="rounded-xl border border-blue-500/30 bg-blue-500/10 p-4">
+    <div
+      className="rounded-xl border border-blue-500/30 bg-blue-500/10 p-4"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+    >
       <div className="flex items-center gap-3">
         <Loader2 className="h-5 w-5 animate-spin flex-shrink-0 text-blue-400" />
         <p className="text-sm text-blue-200">{message}</p>
