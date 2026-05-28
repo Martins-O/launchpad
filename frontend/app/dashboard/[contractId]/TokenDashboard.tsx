@@ -164,7 +164,14 @@ export default function TokenDashboard({ contractId }: { contractId: string }) {
             </button>
           )}
         </div>
-        <HoldersTable holders={holders} />
+        <HoldersTable
+          holders={holders}
+          emptyMessage={
+            contractId.startsWith("C")
+              ? "This is a Soroban-native token, so Horizon cannot enumerate its holders."
+              : "No holder data available."
+          }
+        />
       </section>
 
       {/* Vesting schedule */}

@@ -24,7 +24,13 @@ export function exportHoldersCsv(holders: TokenHolder[]) {
   URL.revokeObjectURL(url);
 }
 
-export function HoldersTable({ holders }: { holders: TokenHolder[] }) {
+export function HoldersTable({
+  holders,
+  emptyMessage = "No holder data available.",
+}: {
+  holders: TokenHolder[];
+  emptyMessage?: string;
+}) {
   const [sortField, setSortField] = useState<SortField>("balance");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [searchQuery, setSearchQuery] = useState("");
@@ -84,7 +90,7 @@ export function HoldersTable({ holders }: { holders: TokenHolder[] }) {
   if (holders.length === 0) {
     return (
       <div className="glass-card p-8 text-center text-gray-500">
-        <p>No holder data available.</p>
+        <p>{emptyMessage}</p>
         <p className="mt-1 text-xs">
           Soroban-native tokens require an indexer for full holder enumeration.
         </p>

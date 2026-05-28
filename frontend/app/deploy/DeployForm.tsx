@@ -20,6 +20,7 @@ import { savePendingMetadata } from "./utils/metadata";
 import { trackDeployment } from "@/lib/deployments";
 import { ArrowLeft, ArrowRight, Rocket } from "lucide-react";
 import { useNetwork } from "@/app/providers/NetworkProvider";
+import { useToast } from "@/app/providers/ToastProvider";
 import { useDeployToken, type DeployTokenError } from "../hooks/useDeployToken";
 
 const optionalNumber = (schema: z.ZodNumber) =>
@@ -84,6 +85,7 @@ export default function DeployForm() {
 
   const simulator = useTransactionSimulator();
   const { networkConfig } = useNetwork();
+  const toast = useToast();
 
   const {
     register,
@@ -230,10 +232,13 @@ export default function DeployForm() {
         // Ignore tracking errors
       }
 
-      // On success, navigate to the token dashboard
-      alert(
-        `Token deployed successfully!\n\nContract ID: ${result.contractId}\nTransaction Hash: ${result.transactionHash}\n\nRedirecting to dashboard...`
-      );
+      toast.show({
+        title: "Token deployed successfully",
+        message: `Contract ID: ${result.contractId}`,
+        variant: "success",
+        duration: 8_000,
+        txHash: result.transactionHash,
+      });
       router.push(`/dashboard/${result.contractId}`);
     } catch (err) {
       // Handle deployment errors

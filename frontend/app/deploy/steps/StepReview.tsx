@@ -2,6 +2,7 @@ import { Control, useWatch } from "react-hook-form";
 import { DeployFormData } from "../DeployForm";
 import { useWallet } from "@/app/hooks/useWallet";
 import { useNetwork } from "@/app/providers/NetworkProvider";
+import { useToast } from "@/app/providers/ToastProvider";
 import * as StellarSdk from "@stellar/stellar-sdk";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/Button";
@@ -111,6 +112,7 @@ export const StepReview = ({ control }: StepProps) => {
 function FriendbotBanner({ threshold = 100 }: { threshold?: number }) {
     const { publicKey } = useWallet();
     const { networkConfig } = useNetwork();
+    const toast = useToast();
     const [balance, setBalance] = useState<number | null>(null);
     const [loading, setLoading] = useState(false);
 
@@ -150,9 +152,12 @@ function FriendbotBanner({ threshold = 100 }: { threshold?: number }) {
             const native = account.balances.find((b) => b.asset_type === "native");
             setBalance(native ? Number(native.balance) : 0);
         } catch (err) {
-            // swallow — show simple feedback
             console.error(err);
-            alert("Friendbot funding failed. See console for details.");
+            toast.show({
+                title: "Friendbot funding failed",
+                message: "See console for details.",
+                variant: "error",
+            });
         } finally {
             setLoading(false);
         }

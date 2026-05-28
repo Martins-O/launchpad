@@ -159,7 +159,13 @@ function ErrorState({
 // Holders table
 // ---------------------------------------------------------------------------
 
-function HoldersTable({ holders }: { holders: TokenHolder[] }) {
+function HoldersTable({
+  holders,
+  emptyMessage = "No holder data available.",
+}: {
+  holders: TokenHolder[];
+  emptyMessage?: string;
+}) {
   const [sortField, setSortField] = useState<SortField>("balance");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
@@ -193,7 +199,7 @@ function HoldersTable({ holders }: { holders: TokenHolder[] }) {
   if (holders.length === 0) {
     return (
       <div className="glass-card p-8 text-center text-gray-500">
-        <p>No holder data available.</p>
+        <p>{emptyMessage}</p>
         <p className="mt-1 text-xs">
           Soroban-native tokens require an indexer for full holder enumeration.
         </p>
@@ -427,7 +433,14 @@ export default function PublicTokenPage({
         <h2 className="mb-4 text-sm font-medium uppercase tracking-wider text-gray-500">
           Top Holders
         </h2>
-        <HoldersTable holders={holders} />
+        <HoldersTable
+          holders={holders}
+          emptyMessage={
+            contractId.startsWith("C")
+              ? "This is a Soroban-native token, so Horizon cannot enumerate its holders."
+              : "No holder data available."
+          }
+        />
       </section>
 
       {/* Footer */}

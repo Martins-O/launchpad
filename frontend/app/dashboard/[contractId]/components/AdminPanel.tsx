@@ -22,7 +22,6 @@ import {
 } from "@/lib/batch";
 import {
     TransactionBuilder,
-    Networks,
     rpc,
     Contract,
     Address,
@@ -39,11 +38,6 @@ import {
     Lock,
 } from "lucide-react";
 import { VestingCurveChart } from "@/components/VestingCurveChart";
-
-/* ── Constants ────────────────────────────────────────────────── */
-
-const RPC_URL = "https://rpc-futurenet.stellar.org";
-const NETWORK_PASSPHRASE = Networks.FUTURENET;
 
 /** String the admin must type to confirm permanent revocation. */
 const REVOKE_CONFIRM_PHRASE = "REVOKE";
@@ -162,7 +156,7 @@ export function AdminPanel({ contractId, maxSupply, totalSupply }: AdminPanelPro
         setLastTxHash(null);
 
         try {
-            const server = new rpc.Server(RPC_URL);
+            const server = new rpc.Server(networkConfig.rpcUrl);
             const account = await server.getAccount(publicKey);
             const contract = new Contract(contractId);
 
@@ -172,7 +166,7 @@ export function AdminPanel({ contractId, maxSupply, totalSupply }: AdminPanelPro
 
             const tx = new TransactionBuilder(account, {
                 fee: "1000",
-                networkPassphrase: NETWORK_PASSPHRASE
+                networkPassphrase: networkConfig.passphrase
             })
                 .addOperation(contract.call("mint_batch", addressesScVal, amountsScVal))
                 .setTimeout(30)
@@ -181,7 +175,7 @@ export function AdminPanel({ contractId, maxSupply, totalSupply }: AdminPanelPro
             const xdrEncoded = tx.toXDR();
             console.log(`Signing batch mint tx for ${contractId} with ${entries.length} recipients`);
 
-            await signTransaction(xdrEncoded, { networkPassphrase: NETWORK_PASSPHRASE });
+            await signTransaction(xdrEncoded, { networkPassphrase: networkConfig.passphrase });
 
             // Mocking submission success
             await new Promise(r => setTimeout(r, 2000));
@@ -211,7 +205,7 @@ export function AdminPanel({ contractId, maxSupply, totalSupply }: AdminPanelPro
         setLastTxHash(null);
 
         try {
-            const server = new rpc.Server(RPC_URL);
+            const server = new rpc.Server(networkConfig.rpcUrl);
 
             // 1. Prepare Arguments
             let method = "";
@@ -258,7 +252,7 @@ export function AdminPanel({ contractId, maxSupply, totalSupply }: AdminPanelPro
 
             const tx = new TransactionBuilder(account, {
                 fee: "1000", // Standard fee
-                networkPassphrase: NETWORK_PASSPHRASE
+                networkPassphrase: networkConfig.passphrase
             })
                 .addOperation(contract.call(method, ...args))
                 .setTimeout(30)
@@ -269,7 +263,7 @@ export function AdminPanel({ contractId, maxSupply, totalSupply }: AdminPanelPro
             console.log(`Signing ${action} tx for ${contractId}`);
 
             // Note: signTransaction's first argument is the XDR string
-            await signTransaction(xdrEncoded, { networkPassphrase: NETWORK_PASSPHRASE });
+            await signTransaction(xdrEncoded, { networkPassphrase: networkConfig.passphrase });
 
             // Mocking submission success for the purpose of the dashboard UI
             await new Promise(r => setTimeout(r, 2000));
@@ -386,7 +380,7 @@ export function AdminPanel({ contractId, maxSupply, totalSupply }: AdminPanelPro
                 </div>
                 {lastTxHash && (
                     <a
-                        href={`https://stellar.expert/explorer/futurenet/tx/${lastTxHash}`}
+                        href={`https://stellar.expert/explorer/${networkConfig.network}/tx/${lastTxHash}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="flex items-center gap-1.5 text-xs text-stellar-400 hover:text-stellar-300 transition-colors bg-stellar-400/10 px-3 py-1.5 rounded-full border border-stellar-400/20"
