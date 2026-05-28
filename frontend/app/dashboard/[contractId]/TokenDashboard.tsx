@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useTranslations } from "next-intl";
 import { Download } from "lucide-react";
 import {
   truncateAddress,
@@ -27,6 +28,7 @@ import { ErrorState, LoadingState } from "./components/DashboardUi";
 // ---------------------------------------------------------------------------
 
 export default function TokenDashboard({ contractId }: { contractId: string }) {
+  const t = useTranslations("dashboard");
   const [tokenInfo, setTokenInfo] = useState<TokenInfo | null>(null);
   const [holders, setHolders] = useState<TokenHolder[]>([]);
   const [supplyBreakdown, setSupplyBreakdown] =
@@ -89,7 +91,7 @@ export default function TokenDashboard({ contractId }: { contractId: string }) {
           <span className="text-stellar-400">({tokenInfo.symbol})</span>
         </h1>
         <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-gray-400">
-          <span className="text-xs text-gray-500">Contract ID:</span>
+          <span className="text-xs text-gray-500">{t("sections.contractId")}:</span>
           <ExplorerLink
             type="contract"
             identifier={contractId}
@@ -101,9 +103,9 @@ export default function TokenDashboard({ contractId }: { contractId: string }) {
       </div>
 
       {/* Token info grid */}
-      <section aria-label="Token details" className="mb-10">
+      <section aria-label={t("sections.tokenDetails")} className="mb-10">
         <h2 className="mb-4 text-sm font-medium uppercase tracking-wider text-gray-500">
-          Token Details
+          {t("sections.tokenDetails")}
         </h2>
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
           <InfoCard label="Name" value={tokenInfo.name} />
@@ -149,10 +151,10 @@ export default function TokenDashboard({ contractId }: { contractId: string }) {
       )}
 
       {/* Top holders */}
-      <section aria-label="Top holders">
+      <section aria-label={t("sections.topHolders")}>
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-sm font-medium uppercase tracking-wider text-gray-500">
-            Top Holders
+            {t("sections.topHolders")}
           </h2>
           {holders.length > 0 && (
             <button
@@ -160,7 +162,7 @@ export default function TokenDashboard({ contractId }: { contractId: string }) {
               className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-gray-300 transition-colors hover:border-stellar-400/30 hover:bg-stellar-500/10 hover:text-stellar-300"
             >
               <Download className="h-3.5 w-3.5" />
-              Export CSV
+              {t("sections.exportCsv")}
             </button>
           )}
         </div>
@@ -175,16 +177,16 @@ export default function TokenDashboard({ contractId }: { contractId: string }) {
       </section>
 
       {/* Vesting schedule */}
-      <section aria-label="Vesting schedule" className="mt-10">
+      <section aria-label={t("sections.vestingSchedule")} className="mt-10">
         <h2 className="mb-4 text-sm font-medium uppercase tracking-wider text-gray-500">
-          Vesting Schedule
+          {t("sections.vestingSchedule")}
         </h2>
         <VestingProgress decimals={tokenInfo.decimals} />
       </section>
 
       {/* Transaction History */}
       <section
-        aria-label="Transaction history"
+        aria-label={t("sections.transactionHistory")}
         className="mt-16 border-t border-white/5 pt-10"
       >
         <TransactionHistory
@@ -195,9 +197,9 @@ export default function TokenDashboard({ contractId }: { contractId: string }) {
       </section>
 
       {/* Token Activity Feed */}
-      <section aria-label="Token activity feed" className="mt-10">
+      <section aria-label={t("sections.tokenActivity")} className="mt-10">
         <h2 className="mb-4 text-sm font-medium uppercase tracking-wider text-gray-500">
-          Token Activity
+          {t("sections.tokenActivity")}
         </h2>
         <ActivityFeed accountId={contractId} />
       </section>

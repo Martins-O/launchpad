@@ -1,6 +1,8 @@
+import { useTranslations } from "next-intl";
 import { RecentLaunches } from "./components/RecentLaunches";
 
 export default function Home() {
+  const t = useTranslations("home");
   return (
     <div className="relative overflow-hidden">
       {/* Background gradient orbs */}
@@ -13,24 +15,22 @@ export default function Home() {
       <section className="relative mx-auto flex min-h-[85vh] max-w-5xl flex-col items-center justify-center px-6 text-center">
         <div className="animate-fade-in-up">
           <span className="mb-4 inline-block rounded-full border border-stellar-500/20 bg-stellar-500/5 px-4 py-1.5 text-xs font-medium tracking-wide text-stellar-300">
-            Built on Stellar Soroban
+            {t("badge")}
           </span>
 
           <h1 className="mt-4 text-5xl font-extrabold leading-tight tracking-tight sm:text-6xl lg:text-7xl">
-            Launch Your Token
+            {t("title")}
             <br />
-            <span className="gradient-text">In Minutes</span>
+            <span className="gradient-text">{t("titleHighlight")}</span>
           </h1>
 
           <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-gray-400">
-            SoroPad is an open-source launchpad for deploying SEP-41 compliant
-            tokens on Soroban — with vesting schedules, admin controls, and a
-            real-time dashboard. No smart-contract code required.
+            {t("description")}
           </p>
 
           <div className="mt-10 flex flex-wrap items-center justify-center gap-4">
             <a href="/deploy" className="btn-primary px-8 py-3 text-base">
-              Deploy a Token
+              {t("deployButton")}
             </a>
             <a
               href="https://github.com/soropad/launchpad"
@@ -38,7 +38,7 @@ export default function Home() {
               rel="noopener noreferrer"
               className="btn-secondary px-8 py-3 text-base"
             >
-              View on GitHub
+              {t("githubButton")}
             </a>
           </div>
         </div>
@@ -50,18 +50,18 @@ export default function Home() {
           {[
             {
               icon: "🪙",
-              title: "One-Click Deploy",
-              desc: "Fill a form, sign with Freighter, and your SEP-41 token is live on Soroban.",
+              title: t("features.deploy.title"),
+              desc: t("features.deploy.description"),
             },
             {
               icon: "🔒",
-              title: "Vesting & Controls",
-              desc: "Cliff + linear vesting per wallet. Mint, burn, and freeze with admin controls.",
+              title: t("features.vesting.title"),
+              desc: t("features.vesting.description"),
             },
             {
               icon: "📊",
-              title: "Live Dashboard",
-              desc: "Supply metrics, holder table, vesting progress — all in real-time.",
+              title: t("features.dashboard.title"),
+              desc: t("features.dashboard.description"),
             },
           ].map((f) => (
             <div key={f.title} className="glass-card p-6">

@@ -8,23 +8,21 @@ import { LanguageSwitcher } from "./LanguageSwitcher";
 // import { NotificationCenter } from "./NotificationCenter";
 import { Globe, ChevronDown, Menu, X } from "lucide-react";
 import { useState } from "react";
-
-const navLinks = [
-  { href: "/deploy", label: "Deploy" },
-  { href: "/dashboard", label: "Dashboard" },
-  { href: "/my-account", label: "My Account" },
-] as const;
-console.log(navLinks);
+import { useTranslations } from "next-intl";
 
 /**
  * Top navbar — extracted as a client component so wallet state
  * (via `useWallet` inside `<WalletButton>`) works with React hooks.
  */
 export function Navbar() {
+  const t = useTranslations("navigation");
+  const common = useTranslations("common");
+  const accessibility = useTranslations("accessibility");
   const navLinks = [
-    { href: "/deploy", label: "Deploy" },
-    { href: "/dashboard", label: "Dashboard" },
-    { href: "/dashboard/allowances", label: "Allowances" },
+    { href: "/deploy", label: t("deploy") },
+    { href: "/dashboard", label: t("dashboard") },
+    { href: "/dashboard/allowances", label: t("allowances") },
+    { href: "/my-account", label: t("myAccount") },
   ] as const;
 
   const navClassName =
@@ -69,7 +67,9 @@ export function Navbar() {
           <button
             onClick={() => setMobileMenuOpen((prev) => !prev)}
             className="rounded-lg border border-white/10 bg-white/5 p-1.5 text-gray-400 transition-colors hover:bg-white/10 hover:text-white md:hidden"
-            aria-label={mobileMenuOpen ? "Close menu" : "Open menu"}
+            aria-label={
+              mobileMenuOpen ? accessibility("closeMenu") : accessibility("openMenu")
+            }
             aria-expanded={mobileMenuOpen}
             aria-controls="mobile-menu"
           >
@@ -115,7 +115,7 @@ export function Navbar() {
                 <NetworkSwitcher />
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-xs text-gray-500">Settings</span>
+                <span className="text-xs text-gray-500">{common("settings")}</span>
                 <SettingsModal />
               </div>
             </div>

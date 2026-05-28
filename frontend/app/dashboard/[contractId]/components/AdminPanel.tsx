@@ -88,6 +88,7 @@ export function AdminPanel({ contractId, maxSupply, totalSupply }: AdminPanelPro
     const [loading, setLoading] = useState<string | null>(null);
     const [lastTxHash, setLastTxHash] = useState<string | null>(null);
     const [success, setSuccess] = useState<string | null>(null);
+    const [announcement, setAnnouncement] = useState("");
     const [showTransferConfirm, setShowTransferConfirm] = useState(false);
     const [locked, setLocked] = useState(false);
     const [showRevokeConfirm, setShowRevokeConfirm] = useState(false);
@@ -148,12 +149,46 @@ export function AdminPanel({ contractId, maxSupply, totalSupply }: AdminPanelPro
         refreshLocked();
     }, [refreshLocked]);
 
+    const submitSignedTransaction = useCallback(
+        async (signedXdr: string) => {
+            const server = new rpc.Server(networkConfig.rpcUrl);
+            const signedTx = TransactionBuilder.fromXDR(
+                signedXdr,
+                networkConfig.passphrase,
+            );
+            const send = await server.sendTransaction(
+                signedTx as Parameters<typeof server.sendTransaction>[0],
+            );
+            if (send.status === "ERROR") {
+                throw new Error(
+                    `Submit failed: ${send.errorResult?.toXDR("base64") ?? "unknown"}`,
+                );
+            }
+
+            let response = await server.getTransaction(send.hash);
+            let attempts = 0;
+            while (response.status === "NOT_FOUND" && attempts < 30) {
+                await new Promise((r) => setTimeout(r, 1000));
+                response = await server.getTransaction(send.hash);
+                attempts += 1;
+            }
+
+            if (response.status === "FAILED") {
+                throw new Error("Transaction failed on-chain");
+            }
+
+            return send.hash;
+        },
+        [networkConfig.passphrase, networkConfig.rpcUrl],
+    );
+
     const handleBatchMint = async (entries: BatchMintEntry[]) => {
         if (!publicKey) return;
 
         setLoading("batch-mint");
         setSuccess(null);
         setLastTxHash(null);
+        const statusLabel = "Batch mint";
 
         try {
             const server = new rpc.Server(networkConfig.rpcUrl);
@@ -175,20 +210,25 @@ export function AdminPanel({ contractId, maxSupply, totalSupply }: AdminPanelPro
             const xdrEncoded = tx.toXDR();
             console.log(`Signing batch mint tx for ${contractId} with ${entries.length} recipients`);
 
-            await signTransaction(xdrEncoded, { networkPassphrase: networkConfig.passphrase });
+            let signedXdr: string;
+            try {
+                signedXdr = await signTransaction(xdrEncoded, { networkPassphrase: networkConfig.passphrase });
+            } catch (signError) {
+                setAnnouncement(`${statusLabel} signing failed.`);
+                throw signError;
+            }
 
-            // Mocking submission success
-            await new Promise(r => setTimeout(r, 2000));
-            const mockHash = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-
-            setLastTxHash(mockHash);
+            const txHash = await submitSignedTransaction(signedXdr);
+            setLastTxHash(txHash);
             setSuccess("batch-mint");
+            setAnnouncement(`${statusLabel} transaction submitted successfully. Transaction hash ${txHash}.`);
 
         } catch (err) {
             const error = err as Error;
             console.error(`batch-mint failed:`, error);
+            setAnnouncement(`${statusLabel} transaction failed.`);
             toast.show({
-                title: "Batch mint failed",
+                title: `${statusLabel} failed`,
                 message: error.message,
                 variant: "error",
             });
@@ -203,6 +243,14 @@ export function AdminPanel({ contractId, maxSupply, totalSupply }: AdminPanelPro
         setLoading(action);
         setSuccess(null);
         setLastTxHash(null);
+        const statusLabel =
+            action === "mint"
+                ? "Mint"
+                : action === "clawback"
+                  ? "Clawback"
+                  : action === "transfer"
+                    ? "Transfer admin"
+                    : "Vesting";
 
         try {
             const server = new rpc.Server(networkConfig.rpcUrl);
@@ -263,14 +311,18 @@ export function AdminPanel({ contractId, maxSupply, totalSupply }: AdminPanelPro
             console.log(`Signing ${action} tx for ${contractId}`);
 
             // Note: signTransaction's first argument is the XDR string
-            await signTransaction(xdrEncoded, { networkPassphrase: networkConfig.passphrase });
+            let signedXdr: string;
+            try {
+                signedXdr = await signTransaction(xdrEncoded, { networkPassphrase: networkConfig.passphrase });
+            } catch (signError) {
+                setAnnouncement(`${statusLabel} signing failed.`);
+                throw signError;
+            }
 
-            // Mocking submission success for the purpose of the dashboard UI
-            await new Promise(r => setTimeout(r, 2000));
-            const mockHash = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-
-            setLastTxHash(mockHash);
+            const txHash = await submitSignedTransaction(signedXdr);
+            setLastTxHash(txHash);
             setSuccess(action);
+            setAnnouncement(`${statusLabel} transaction submitted successfully. Transaction hash ${txHash}.`);
 
             if (action === "mint") mintForm.reset();
             if (action === "clawback") burnForm.reset();
@@ -282,8 +334,9 @@ export function AdminPanel({ contractId, maxSupply, totalSupply }: AdminPanelPro
         } catch (err) {
             const error = err as Error;
             console.error(`${action} failed:`, error);
+            setAnnouncement(`${statusLabel} transaction failed.`);
             toast.show({
-                title: `${action.charAt(0).toUpperCase() + action.slice(1)} failed`,
+                title: `${statusLabel} failed`,
                 message: error.message,
                 variant: "error",
             });
@@ -373,6 +426,9 @@ export function AdminPanel({ contractId, maxSupply, totalSupply }: AdminPanelPro
 
     return (
         <section className="mt-12 w-full max-w-4xl animate-in fade-in slide-in-from-bottom-4 duration-700">
+            <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+                {announcement}
+            </p>
             <div className="flex items-center justify-between mb-6">
                 <div className="flex items-center gap-3">
                     <ShieldAlert className="w-6 h-6 text-stellar-400" />

@@ -120,6 +120,16 @@
     "searchPlaceholder": "CABC123...XYZ (contract ID)",
     "searchLabel": "Contract ID",
     "viewMyAccount": "View My Account",
+    "sections": {
+      "contractId": "Contract ID",
+      "tokenDetails": "Token Details",
+      "topHolders": "Top Holders",
+      "vestingSchedule": "Vesting Schedule",
+      "transactionHistory": "Transaction History",
+      "tokenActivity": "Token Activity",
+      "exportCsv": "Export CSV",
+      "adminConsole": "Admin Console"
+    },
     "errors": {
       "emptyContract": "Please enter a contract ID.",
       "invalidFormat": "Invalid contract ID format. Expected a 56-character Stellar address."

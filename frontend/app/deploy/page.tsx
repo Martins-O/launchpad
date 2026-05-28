@@ -1,3 +1,4 @@
+import { useTranslations } from "next-intl";
 import DeployForm from "./DeployForm";
 
 /**
@@ -9,15 +10,15 @@ import DeployForm from "./DeployForm";
  */
 
 export default function DeployPage() {
+  const t = useTranslations("deploy");
   return (
     <div className="mx-auto flex min-h-[80vh] max-w-4xl flex-col items-center justify-center px-6 py-12">
       <div className="text-center mb-12">
         <h1 className="text-4xl font-bold text-white mb-4 animate-fade-in-up">
-          Deploy Your <span className="gradient-text">Soroban Token</span>
+          {t("title")} <span className="gradient-text">{t("titleHighlight")}</span>
         </h1>
         <p className="text-gray-400 max-w-lg mx-auto animate-fade-in-up [animation-delay:100ms]">
-          Launch a production-ready SEP-41 token in minutes. Configure your metadata,
-          supply, and governance, then deploy to the Stellar network.
+          {t("description")}
         </p>
       </div>
 

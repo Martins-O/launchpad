@@ -120,6 +120,16 @@
     "searchPlaceholder": "CABC123...XYZ (ID de contrato)",
     "searchLabel": "ID de Contrato",
     "viewMyAccount": "Ver Mi Cuenta",
+    "sections": {
+      "contractId": "ID de Contrato",
+      "tokenDetails": "Detalles del Token",
+      "topHolders": "Principales holders",
+      "vestingSchedule": "Calendario de vesting",
+      "transactionHistory": "Historial de transacciones",
+      "tokenActivity": "Actividad del token",
+      "exportCsv": "Exportar CSV",
+      "adminConsole": "Consola de administración"
+    },
     "errors": {
       "emptyContract": "Por favor ingresa un ID de contrato.",
       "invalidFormat": "Formato de ID de contrato inválido. Se espera una dirección Stellar de 56 caracteres."
