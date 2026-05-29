@@ -5,10 +5,13 @@ import { useNetwork } from "@/app/providers/NetworkProvider";
 import * as StellarSdk from "@stellar/stellar-sdk";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/Button";
-import { Wallet } from "lucide-react";
+import { Wallet, Zap } from "lucide-react";
 
 interface StepProps {
     control: Control<DeployFormData>;
+    estimatedFee?: string | null;
+    feeEstimationLoading?: boolean;
+    feeEstimationError?: string | null;
 }
 
 const SummaryItem = ({ label, value }: { label: string; value: string | number | undefined }) => (
@@ -29,7 +32,7 @@ const FlagItem = ({ label, enabled }: { label: string; enabled: boolean }) => (
     </div>
 );
 
-export const StepReview = ({ control }: StepProps) => {
+export const StepReview = ({ control, estimatedFee, feeEstimationLoading, feeEstimationError }: StepProps) => {
     const formData = useWatch({ control });
     const { publicKey, connect } = useWallet();
     const adminModeLabel =
@@ -65,6 +68,38 @@ export const StepReview = ({ control }: StepProps) => {
                 <SummaryItem label="Logo URL" value={formData.logoUrl} />
                 <SummaryItem label="Twitter" value={formData.twitter} />
                 <SummaryItem label="Discord" value={formData.discord} />
+            </div>
+
+            {/* Estimated Network Fee */}
+            <div className="glass-card p-4 border-stellar-400/20">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-lg bg-stellar-400/10">
+                    <Zap className="h-5 w-5 text-stellar-400" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-white">Estimated Network Fee</p>
+                    <p className="text-xs text-gray-400">Pre-flight simulation cost</p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  {feeEstimationLoading ? (
+                    <div className="flex items-center gap-2">
+                      <div className="animate-spin h-4 w-4 border-2 border-stellar-400 border-t-transparent rounded-full" />
+                      <span className="text-sm text-gray-400">Estimating...</span>
+                    </div>
+                  ) : feeEstimationError ? (
+                    <span className="text-sm text-red-400">Failed to estimate</span>
+                  ) : estimatedFee ? (
+                    <div className="flex items-center gap-1">
+                      <span className="text-xl font-bold text-stellar-400">~{estimatedFee}</span>
+                      <span className="text-sm text-gray-400">XLM</span>
+                    </div>
+                  ) : (
+                    <span className="text-sm text-gray-500">Run "Check" to estimate</span>
+                  )}
+                </div>
+              </div>
             </div>
 
             {(formData.authorizationRequired || formData.authorizationRevocable) && (
