@@ -227,6 +227,48 @@ export async function fetchTokenAllowance(
   return BigInt(decodeI128(allowanceVal));
 }
 
+export interface AllowanceWithExpiration {
+  amount: bigint;
+  expirationLedger: number;
+}
+
+export async function fetchAllowanceWithExpiration(
+  contractId: string,
+  ownerAddress: string,
+  spenderAddress: string,
+  config: NetworkConfig,
+): Promise<AllowanceWithExpiration> {
+  const args = [
+    new StellarSdk.Address(ownerAddress).toScVal(),
+    new StellarSdk.Address(spenderAddress).toScVal(),
+  ];
+  const allowanceVal = await simulateCall(
+    contractId,
+    "allowance",
+    config,
+    args,
+  );
+
+  const amount = BigInt(decodeI128(allowanceVal));
+
+  let expirationLedger = 0;
+  try {
+    if (
+      allowanceVal.switch() ===
+      StellarSdk.xdr.ScValType.scvVec()
+    ) {
+      const items = allowanceVal.vec();
+      if (items && items.length >= 2) {
+        expirationLedger = decodeU32(items[1]);
+      }
+    }
+  } catch {
+    // If parsing the tuple fails, default to 0
+  }
+
+  return { amount, expirationLedger };
+}
+
 export async function fetchApprovedSpendersFromEvents(params: {
   contractId: string;
   ownerAddress: string;
@@ -304,7 +346,7 @@ export function decodeI128(val: StellarSdk.xdr.ScVal): string {
 }
 
 /** Decode an ScVal u32. */
-function decodeU32(val: StellarSdk.xdr.ScVal): number {
+export function decodeU32(val: StellarSdk.xdr.ScVal): number {
   return val.u32();
 }
 

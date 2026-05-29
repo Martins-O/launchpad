@@ -13,7 +13,7 @@ import {
   fetchApprovedSpendersFromEvents,
   fetchCurrentLedger,
   fetchTokenDecimals,
-  fetchTokenAllowance,
+  fetchAllowanceWithExpiration,
   formatTokenAmount,
   submitTransaction,
 } from "@/lib/stellar";
@@ -65,7 +65,7 @@ export function AllowancesPage({
 
       const results = await Promise.all(
         spenders.map(async (spenderAddress) => {
-          const amount = await fetchTokenAllowance(
+          const { amount, expirationLedger } = await fetchAllowanceWithExpiration(
             contractId,
             publicKey,
             spenderAddress,
@@ -78,7 +78,7 @@ export function AllowancesPage({
             spenderAddress,
             amount: amount.toString(),
             amountFormatted: formatTokenAmount(amount.toString(), decimals),
-            expiresAt: undefined,
+            expirationLedger: expirationLedger > 0 ? expirationLedger : undefined,
             isExpired,
           };
 

@@ -1,16 +1,34 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useCallback } from "react";
 import { ApproveForm } from "@/components/forms/ApproveForm";
 import { RevokeAllowanceForm } from "@/components/forms/RevokeAllowanceForm";
 import { TransferFromForm } from "@/components/forms/TransferFromForm";
-import { AlertCircle, CheckCircle, AlertTriangle } from "lucide-react";
+import { AllowanceCard, type AllowanceInfo } from "@/components/ui/AllowanceCard";
+import { Button } from "@/components/ui/Button";
+import { Input } from "@/components/ui/Input";
+import { useWallet } from "@/app/hooks/useWallet";
+import { useNetwork } from "@/app/providers/NetworkProvider";
+import {
+  buildApproveTransaction,
+  fetchApprovedSpendersFromEvents,
+  fetchCurrentLedger,
+  fetchTokenDecimals,
+  fetchAllowanceWithExpiration,
+  formatTokenAmount,
+  submitTransaction,
+} from "@/lib/stellar";
+import { AlertCircle, CheckCircle, AlertTriangle, Loader2 } from "lucide-react";
 
-type TabType = "grant" | "revoke" | "transfer";
+type TabType = "view" | "grant" | "revoke" | "transfer";
 
 interface NotificationState {
   type: "success" | "error";
   message: string;
+}
+
+interface AllowanceManagerProps {
+  contractId?: string;
 }
 
 /**
@@ -21,14 +39,106 @@ interface NotificationState {
  * - Revoking existing allowances
  * - Transferring tokens using allowances
  */
-export function AllowanceManager() {
+export function AllowanceManager({ contractId: initialContractId }: AllowanceManagerProps) {
   const [activeTab, setActiveTab] = useState<TabType>("grant");
   const [notification, setNotification] = useState<NotificationState | null>(
     null,
   );
 
+  const [viewContractId, setViewContractId] = useState(initialContractId || "");
+  const [allowances, setAllowances] = useState<AllowanceInfo[]>([]);
+  const [isLoadingAllowances, setIsLoadingAllowances] = useState(false);
+  const [allowancesError, setAllowancesError] = useState<string | null>(null);
+  const [revokingSpender, setRevokingSpender] = useState<string | null>(null);
+
+  const { publicKey, signTransaction } = useWallet();
+  const { networkConfig } = useNetwork();
+
+  const loadAllowances = useCallback(async () => {
+    const contractId = viewContractId || initialContractId;
+    if (!contractId || !publicKey) {
+      setAllowancesError("Both contract ID and wallet connection required");
+      return;
+    }
+
+    setIsLoadingAllowances(true);
+    setAllowancesError(null);
+
+    try {
+      const decimals = await fetchTokenDecimals(contractId, networkConfig);
+      const [, spenders] = await Promise.all([
+        fetchCurrentLedger(networkConfig),
+        fetchApprovedSpendersFromEvents({
+          contractId,
+          ownerAddress: publicKey,
+          config: networkConfig,
+          maxPages: 5,
+        }),
+      ]);
+
+      const results = await Promise.all(
+        spenders.map(async (spenderAddress) => {
+          const { amount, expirationLedger } = await fetchAllowanceWithExpiration(
+            contractId,
+            publicKey,
+            spenderAddress,
+            networkConfig,
+          );
+
+          const isExpired = amount <= BigInt(0);
+
+          const allowance: AllowanceInfo = {
+            spenderAddress,
+            amount: amount.toString(),
+            amountFormatted: formatTokenAmount(amount.toString(), decimals),
+            expirationLedger: expirationLedger > 0 ? expirationLedger : undefined,
+            isExpired,
+          };
+
+          return allowance;
+        }),
+      );
+
+      setAllowances(results.filter((a) => a.amount !== "0"));
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to load allowances";
+      setAllowancesError(message);
+    } finally {
+      setIsLoadingAllowances(false);
+    }
+  }, [viewContractId, initialContractId, publicKey, networkConfig]);
+
+  const handleRevokeAllowance = async (spenderAddress: string) => {
+    const contractId = viewContractId || initialContractId;
+    if (!contractId || !publicKey) return;
+
+    setRevokingSpender(spenderAddress);
+    try {
+      const xdr = await buildApproveTransaction({
+        tokenContractId: contractId,
+        ownerAddress: publicKey,
+        spenderAddress,
+        amount: BigInt(0),
+        expirationLedger: 1000,
+        config: networkConfig,
+      });
+
+      const signedXdr = await signTransaction(xdr);
+      await submitTransaction(signedXdr, networkConfig);
+      await loadAllowances();
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to revoke allowance";
+      setAllowancesError(message);
+    } finally {
+      setRevokingSpender(null);
+    }
+  };
+
   const handleSuccess = (txHash: string, tab: TabType) => {
     const messages = {
+      view: "",
       grant: "Allowance granted successfully!",
       revoke: "Allowance revoked successfully!",
       transfer: "Transfer completed successfully!",
@@ -92,6 +202,12 @@ export function AllowanceManager() {
       {/* Tab Navigation */}
       <div className="flex gap-2 border-b border-white/10">
         <TabButton
+          tab="view"
+          label="View Allowances"
+          active={activeTab === "view"}
+          onClick={() => setActiveTab("view")}
+        />
+        <TabButton
           tab="grant"
           label="Grant Allowance"
           active={activeTab === "grant"}
@@ -113,6 +229,65 @@ export function AllowanceManager() {
 
       {/* Tab Content */}
       <div className="glass-card p-6">
+        {activeTab === "view" && (
+          <div className="space-y-4">
+            <div className="flex gap-3">
+              <Input
+                value={viewContractId}
+                onChange={(e) => setViewContractId(e.target.value)}
+                placeholder="C..."
+                className="font-mono text-sm flex-1"
+              />
+              <Button
+                onClick={loadAllowances}
+                disabled={!viewContractId || isLoadingAllowances}
+                className="flex items-center gap-2"
+              >
+                {isLoadingAllowances && (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                )}
+                Load Allowances
+              </Button>
+            </div>
+
+            {allowancesError && (
+              <div className="flex items-center gap-3 p-4 bg-red-600/10 border border-red-600/50 rounded-lg">
+                <AlertCircle className="h-5 w-5 text-red-400 shrink-0" />
+                <p className="text-sm text-red-300">{allowancesError}</p>
+              </div>
+            )}
+
+            {isLoadingAllowances && (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-8 w-8 animate-spin text-stellar-400" />
+              </div>
+            )}
+
+            {!isLoadingAllowances && allowances.length === 0 && !allowancesError && (
+              <div className="flex flex-col items-center justify-center py-12 text-center">
+                <AlertCircle className="h-8 w-8 text-gray-600" />
+                <p className="text-sm font-medium text-gray-300 mt-3">No allowances</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  Enter a contract ID above and click Load Allowances.
+                </p>
+              </div>
+            )}
+
+            {allowances.length > 0 && (
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                {allowances.map((allowance) => (
+                  <AllowanceCard
+                    key={allowance.spenderAddress}
+                    allowance={allowance}
+                    onRevoke={handleRevokeAllowance}
+                    isRevoking={revokingSpender === allowance.spenderAddress}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {activeTab === "grant" && (
           <ApproveForm
             onSuccess={(hash) => handleSuccess(hash, "grant")}
