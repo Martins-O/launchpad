@@ -6,6 +6,7 @@ export interface TrackedDeployment {
   symbol: string;
   network: string;
   timestamp: number;
+  vestingContractId?: string;
 }
 
 const STORAGE_KEY_PREFIX = "soropad:deployments:";

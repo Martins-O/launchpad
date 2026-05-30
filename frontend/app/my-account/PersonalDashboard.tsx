@@ -197,15 +197,16 @@ export default function PersonalDashboard() {
     [publicKey, fetchAccountOperations],
   );
 
-  // Load vesting schedule
-  const lookupVesting = useCallback(async () => {
-    if (!publicKey || !vestingContractId.trim()) return;
+  // Load vesting schedule by contract ID
+  const doVestingLookup = useCallback(async (contractId: string) => {
+    if (!publicKey || !contractId.trim()) return;
+    setVestingContractId(contractId);
     setVestingLoading(true);
     setVestingError(null);
     setVestingSchedule(null);
     try {
       const [schedule, ledger] = await Promise.all([
-        fetchVestingSchedule(vestingContractId.trim(), publicKey),
+        fetchVestingSchedule(contractId.trim(), publicKey),
         fetchCurrentLedger(),
       ]);
       setVestingSchedule(schedule);
@@ -219,7 +220,11 @@ export default function PersonalDashboard() {
     } finally {
       setVestingLoading(false);
     }
-  }, [publicKey, vestingContractId, fetchVestingSchedule, fetchCurrentLedger]);
+  }, [publicKey, fetchVestingSchedule, fetchCurrentLedger]);
+
+  const lookupVesting = useCallback(async () => {
+    await doVestingLookup(vestingContractId);
+  }, [vestingContractId, doVestingLookup]);
 
   // Initial data load
   useEffect(() => {
@@ -404,13 +409,24 @@ export default function PersonalDashboard() {
                   <span className="text-[10px] text-gray-500 bg-white/5 px-2 py-0.5 rounded uppercase">
                     {token.network}
                   </span>
-                  <Link 
-                    href={`/dashboard/${token.contractId}`}
-                    className="text-xs text-stellar-400 hover:text-stellar-300 flex items-center gap-1 group-hover:translate-x-1 transition-transform"
-                  >
-                    View Dashboard
-                    <ExternalLink className="w-3 h-3" />
-                  </Link>
+                  <div className="flex items-center gap-3">
+                    {token.vestingContractId && (
+                      <button
+                        onClick={() => doVestingLookup(token.vestingContractId!)}
+                        className="text-xs text-stellar-400 hover:text-stellar-300 font-medium"
+                        title="Check vesting schedule for this deployment"
+                      >
+                        Check Vesting
+                      </button>
+                    )}
+                    <Link
+                      href={`/dashboard/${token.contractId}`}
+                      className="text-xs text-stellar-400 hover:text-stellar-300 flex items-center gap-1 group-hover:translate-x-1 transition-transform"
+                    >
+                      View Dashboard
+                      <ExternalLink className="w-3 h-3" />
+                    </Link>
+                  </div>
                 </div>
               </div>
             ))

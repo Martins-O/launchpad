@@ -19,7 +19,7 @@ import { useTransactionSimulator } from "@/hooks/useTransactionSimulator";
 import { useWallet } from "@/app/hooks/useWallet";
 import { savePendingMetadata } from "./utils/metadata";
 import { trackDeployment } from "@/lib/deployments";
-import { ArrowLeft, ArrowRight, Rocket } from "lucide-react";
+import { ArrowLeft, ArrowRight, Rocket, Wallet } from "lucide-react";
 import { useNetwork } from "@/app/providers/NetworkProvider";
 import { useToast } from "@/app/providers/ToastProvider";
 import { useDeployToken, type DeployTokenError } from "../hooks/useDeployToken";
@@ -80,7 +80,7 @@ export default function DeployForm() {
   const [cooldownRemainingMs, setCooldownRemainingMs] = useState(0);
 
   const router = useRouter();
-  const { publicKey } = useWallet();
+  const { publicKey, connect } = useWallet();
   const { deployToken } = useDeployToken();
   const COOLDOWN_MS = 60_000;
 
@@ -331,6 +331,20 @@ export default function DeployForm() {
         <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
           {announcement}
         </p>
+        {!publicKey && currentStep < 4 && (
+          <div className="mb-6 flex items-center gap-3 px-4 py-3 rounded-lg bg-stellar-500/10 border border-stellar-500/20 text-sm">
+            <Wallet className="w-4 h-4 text-stellar-400 shrink-0" />
+            <span className="text-gray-300 flex-1">Connect your wallet before deploying — you can still fill in the form now.</span>
+            <button
+              type="button"
+              onClick={connect}
+              className="text-stellar-400 hover:text-stellar-300 font-semibold text-xs whitespace-nowrap underline"
+            >
+              Connect
+            </button>
+          </div>
+        )}
+
         <div className="grow">
           {currentStep === 1 && (
             <StepMetadata register={register} errors={errors} />
