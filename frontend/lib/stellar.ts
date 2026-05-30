@@ -1058,6 +1058,7 @@ export interface SupplyBreakdown {
   circulating: number;
   locked: number;
   burned: number;
+  burnedAvailable: boolean;
   total: number;
 }
 
@@ -1084,6 +1085,7 @@ export async function fetchSupplyBreakdown(
 
     // Fetch total burned from token contract (tracked explicitly on-chain)
     let burnedSupply = 0;
+    let burnedAvailable = false;
     try {
       const burnedVal = await simulateCall(
         tokenContractId,
@@ -1091,9 +1093,10 @@ export async function fetchSupplyBreakdown(
         config,
       );
       burnedSupply = Number(decodeI128(burnedVal));
+      burnedAvailable = true;
     } catch {
-      // If the contract doesn't expose total_burned for some reason, assume 0
       burnedSupply = 0;
+      burnedAvailable = false;
     }
 
     // Locked supply is modeled as the token balance held by the vesting
@@ -1123,6 +1126,7 @@ export async function fetchSupplyBreakdown(
       circulating: circulatingSupply,
       locked: lockedSupply,
       burned: burnedSupply,
+      burnedAvailable,
       total: totalSupply,
     };
   } catch (error) {

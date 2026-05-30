@@ -11,6 +11,7 @@ export interface SupplyData {
   circulating: number;
   locked: number;
   burned: number;
+  burnedAvailable: boolean;
   total: number;
 }
 
@@ -48,12 +49,26 @@ function CustomTooltip({
 }: {
   active?: boolean;
   payload?: Array<{
-    payload: { name: string; value: number; percentage: number };
+    payload: { name: string; value: number; percentage: number; unavailable?: boolean };
   }>;
 }) {
   if (!active || !payload || !payload.length) return null;
 
   const data = payload[0].payload;
+
+  if (data.unavailable) {
+    return (
+      <div className="rounded-lg border border-white/10 bg-void-900/95 p-3 shadow-xl backdrop-blur-sm">
+        <p className="mb-2 text-sm font-semibold text-white">{data.name}</p>
+        <div className="space-y-1 text-xs">
+          <p className="text-gray-400">
+            Burn data unavailable — this contract does not expose{" "}
+            <span className="font-mono text-gray-300">total_burned</span>
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="rounded-lg border border-white/10 bg-void-900/95 p-3 shadow-xl backdrop-blur-sm">
@@ -87,12 +102,14 @@ function CustomLegend({
     value: number;
     percentage: number;
     color: string;
+    unavailable?: boolean;
   }>;
 }) {
   const icons = {
     "Circulating Supply": <TrendingUp className="h-4 w-4" />,
     "Locked (Vesting)": <Lock className="h-4 w-4" />,
     "Total Burned": <Flame className="h-4 w-4" />,
+    "Total Burned (unavailable)": <Flame className="h-4 w-4" />,
   };
 
   return (
@@ -100,7 +117,9 @@ function CustomLegend({
       {data.map((entry, index) => (
         <div
           key={`legend-${index}`}
-          className="glass-card flex items-center gap-3 p-3 transition-all hover:border-stellar-400/30"
+          className={`glass-card flex items-center gap-3 p-3 transition-all hover:border-stellar-400/30 ${
+            entry.unavailable ? "opacity-60" : ""
+          }`}
         >
           <div
             className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg"
@@ -109,12 +128,23 @@ function CustomLegend({
             {icons[entry.name as keyof typeof icons]}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-xs font-medium text-gray-400">{entry.name}</p>
+            <p className="text-xs font-medium text-gray-400">
+              {entry.unavailable ? (
+                <span className="flex items-center gap-1">
+                  Total Burned
+                  <span className="inline-flex items-center rounded bg-gray-700/50 px-1.5 py-0.5 text-[10px] font-medium text-gray-400">
+                    unavailable
+                  </span>
+                </span>
+              ) : (
+                entry.name
+              )}
+            </p>
             <p className="truncate font-mono text-sm font-semibold text-white">
-              {formatNumber(entry.value)}
+              {entry.unavailable ? "—" : formatNumber(entry.value)}
             </p>
             <p className="text-xs text-stellar-400">
-              {entry.percentage.toFixed(2)}%
+              {entry.unavailable ? "—" : `${entry.percentage.toFixed(2)}%`}
             </p>
           </div>
         </div>
@@ -138,6 +168,7 @@ function CustomLegend({
  *     circulating: 50000000,
  *     locked: 30000000,
  *     burned: 5000000,
+ *     burnedAvailable: true,
  *     total: 85000000
  *   }}
  *   symbol="TOKEN"
@@ -158,28 +189,39 @@ export default function SupplyBreakdownChart({
       circulating: "#54a3ff", // Stellar blue
       locked: "#f59e0b", // Amber for locked
       burned: "#ef4444", // Red for burned
+      burnedUnavailable: "#6b7280", // Gray for unavailable burn data
     };
 
-    return [
+    const items = [
       {
         name: "Circulating Supply",
         value: data.circulating,
         percentage: (data.circulating / total) * 100,
         color: COLORS.circulating,
+        unavailable: false,
       },
       {
         name: "Locked (Vesting)",
         value: data.locked,
         percentage: (data.locked / total) * 100,
         color: COLORS.locked,
+        unavailable: false,
       },
       {
-        name: "Total Burned",
-        value: data.burned,
-        percentage: (data.burned / total) * 100,
-        color: COLORS.burned,
+        name: data.burnedAvailable ? "Total Burned" : "Total Burned (unavailable)",
+        value: data.burnedAvailable ? data.burned : 0,
+        percentage: data.burnedAvailable ? (data.burned / total) * 100 : 0,
+        color: data.burnedAvailable ? COLORS.burned : COLORS.burnedUnavailable,
+        unavailable: !data.burnedAvailable,
       },
-    ].filter((item) => item.value > 0); // Only show non-zero values
+    ];
+
+    // When burned is unavailable, always include it as a visible placeholder
+    // When burned is available, only show non-zero values
+    if (!data.burnedAvailable) {
+      return items;
+    }
+    return items.filter((item) => item.value > 0);
   }, [data]);
 
   // Calculate total for center display
@@ -222,6 +264,7 @@ export default function SupplyBreakdownChart({
                   fill={entry.color}
                   stroke="rgba(10, 14, 26, 0.5)"
                   strokeWidth={2}
+                  strokeDasharray={entry.unavailable ? "4 2" : undefined}
                 />
               ))}
             </Pie>

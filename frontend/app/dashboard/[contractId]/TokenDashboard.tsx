@@ -142,6 +142,7 @@ export default function TokenDashboard({ contractId }: { contractId: string }) {
               circulating: supplyBreakdown.circulating,
               locked: supplyBreakdown.locked,
               burned: supplyBreakdown.burned,
+              burnedAvailable: supplyBreakdown.burnedAvailable,
               total: supplyBreakdown.total,
             }}
             symbol={tokenInfo.symbol}
