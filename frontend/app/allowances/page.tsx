@@ -1,10 +1,19 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useCallback } from "react";
 import { AllowanceManager } from "@/components/AllowanceManager";
 import { AllowanceList } from "@/components/AllowanceList";
 import { Input } from "@/components/ui/Input";
-import { AlertCircle } from "lucide-react";
+import { Button } from "@/components/ui/Button";
+import { useWallet } from "@/app/hooks/useWallet";
+import { useNetwork } from "@/app/providers/NetworkProvider";
+import {
+  fetchApprovedSpendersFromEvents,
+  fetchTokenDecimals,
+  fetchAllowanceWithExpiration,
+  formatTokenAmount,
+} from "@/lib/stellar";
+import { AlertCircle, RefreshCw } from "lucide-react";
 
 /**
  * AllowancesPage - Full-page allowance management interface
@@ -20,18 +29,69 @@ export default function AllowancesPage() {
     "manage",
   );
 
-  // In a real implementation, this would fetch allowances from the contract
-  const mockAllowances = [
-    {
-      id: "1",
-      tokenContractId: selectedContractId || "C...",
-      spenderAddress:
-        "GCPFGJGZOXPF5EZBQ7TGVGVW4ZBDAJT3RDSAICABJ7GCM3QQHLJNZ7PZ",
-      amount: "1000.00",
-      expirationLedger: 1000000,
-      isExpired: false,
-    },
-  ];
+  const [allowances, setAllowances] = useState<Array<{
+    id: string;
+    tokenContractId: string;
+    spenderAddress: string;
+    amount: string;
+    expirationLedger: number;
+    isExpired: boolean;
+  }>>([]);
+  const [isLoadingAllowances, setIsLoadingAllowances] = useState(false);
+  const [allowancesError, setAllowancesError] = useState<string | null>(null);
+
+  const { publicKey } = useWallet();
+  const { networkConfig } = useNetwork();
+
+  const loadAllowances = useCallback(async () => {
+    if (!selectedContractId || !publicKey) {
+      setAllowancesError("Both contract ID and wallet connection required");
+      return;
+    }
+
+    setIsLoadingAllowances(true);
+    setAllowancesError(null);
+
+    try {
+      const decimals = await fetchTokenDecimals(selectedContractId, networkConfig);
+      const spenders = await fetchApprovedSpendersFromEvents({
+        contractId: selectedContractId,
+        ownerAddress: publicKey,
+        config: networkConfig,
+        maxPages: 5,
+      });
+
+      const results = await Promise.all(
+        spenders.map(async (spenderAddress) => {
+          const { amount, expirationLedger } = await fetchAllowanceWithExpiration(
+            selectedContractId,
+            publicKey,
+            spenderAddress,
+            networkConfig,
+          );
+
+          return {
+            id: spenderAddress,
+            tokenContractId: selectedContractId,
+            spenderAddress,
+            amount: amount > BigInt(0)
+              ? formatTokenAmount(amount.toString(), decimals)
+              : "0",
+            expirationLedger: expirationLedger > 0 ? expirationLedger : 0,
+            isExpired: amount <= BigInt(0),
+          };
+        }),
+      );
+
+      setAllowances(results.filter((a) => a.amount !== "0"));
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to load allowances";
+      setAllowancesError(message);
+    } finally {
+      setIsLoadingAllowances(false);
+    }
+  }, [selectedContractId, publicKey, networkConfig]);
 
   return (
     <div className="min-h-screen bg-linear-to-b from-gray-950 via-gray-900 to-black">
@@ -92,7 +152,7 @@ export default function AllowancesPage() {
         {/* Content */}
         {activeSection === "manage" && (
           <div className="mb-12">
-            <AllowanceManager />
+            <AllowanceManager contractId={selectedContractId} />
           </div>
         )}
 
@@ -107,11 +167,31 @@ export default function AllowancesPage() {
               </p>
             </div>
 
+            {selectedContractId && (
+              <div className="flex gap-2">
+                <Button
+                  onClick={loadAllowances}
+                  disabled={isLoadingAllowances}
+                  className="flex items-center gap-2"
+                >
+                  <RefreshCw className={`h-4 w-4 ${isLoadingAllowances ? "animate-spin" : ""}`} />
+                  Load Allowances
+                </Button>
+              </div>
+            )}
+
+            {allowancesError && (
+              <div className="p-4 bg-red-600/10 border border-red-600/50 rounded-lg flex items-center gap-3">
+                <AlertCircle className="h-5 w-5 text-red-400 shrink-0" />
+                <p className="text-sm text-red-300">{allowancesError}</p>
+              </div>
+            )}
+
             {selectedContractId ? (
               <AllowanceList
                 contractId={selectedContractId}
-                allowances={mockAllowances}
-                isLoading={false}
+                allowances={allowances}
+                isLoading={isLoadingAllowances}
               />
             ) : (
               <div className="glass-card p-8 text-center">

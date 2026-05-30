@@ -9,8 +9,9 @@ import { truncateAddress } from "@/lib/stellar";
 export interface AllowanceInfo {
   spenderAddress: string;
   amount: string;
-  amountFormatted: string; // Human-readable with decimals
+  amountFormatted: string;
   expiresAt?: Date;
+  expirationLedger?: number;
   isExpired?: boolean;
 }
 
@@ -28,8 +29,13 @@ export function AllowanceCard({
   onRevoke,
   isRevoking,
 }: AllowanceCardProps) {
-  const expiresDate = allowance.expiresAt?.toLocaleDateString() || "N/A";
-  const expiresTime = allowance.expiresAt?.toLocaleTimeString() || "";
+  const expiresDate = allowance.expiresAt?.toLocaleDateString() || undefined;
+  const expiresTime = allowance.expiresAt?.toLocaleTimeString() || undefined;
+  const displayExpiration = expiresDate
+    ? `${expiresDate}${expiresTime ? ` ${expiresTime}` : ""}`
+    : allowance.expirationLedger
+      ? `Ledger ${allowance.expirationLedger.toLocaleString()}`
+      : "N/A";
 
   return (
     <div
@@ -69,10 +75,7 @@ export function AllowanceCard({
               Expires
             </p>
             <div className="flex flex-col">
-              <p className="text-sm text-white">{expiresDate}</p>
-              {expiresTime && (
-                <p className="text-xs text-gray-400">{expiresTime}</p>
-              )}
+              <p className="text-sm text-white">{displayExpiration}</p>
               {allowance.isExpired && (
                 <p className="text-xs text-red-400 font-medium">Expired</p>
               )}

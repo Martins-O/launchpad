@@ -4,6 +4,26 @@ import userEvent from "@testing-library/user-event";
 import { AllowanceManager } from "@/components/AllowanceManager";
 import { AllowanceList } from "@/components/AllowanceList";
 
+// Mock the hooks
+jest.mock("@/app/hooks/useWallet");
+jest.mock("@/app/providers/NetworkProvider", () => ({
+  useNetwork: () => ({
+    networkConfig: { horizonUrl: "https://horizon-testnet.stellar.org", network: "testnet" }
+  }),
+}));
+
+// Mock stellar functions used by AllowanceManager
+jest.mock("@/lib/stellar", () => ({
+  buildApproveTransaction: jest.fn().mockResolvedValue("xdr-string"),
+  fetchApprovedSpendersFromEvents: jest.fn().mockResolvedValue([]),
+  fetchCurrentLedger: jest.fn().mockResolvedValue(1000000),
+  fetchTokenDecimals: jest.fn().mockResolvedValue(7),
+  fetchAllowanceWithExpiration: jest.fn().mockResolvedValue({ amount: BigInt(0), expirationLedger: 0 }),
+  formatTokenAmount: jest.fn().mockReturnValue("0.0000000"),
+  submitTransaction: jest.fn().mockResolvedValue("tx-hash"),
+  truncateAddress: (addr: string) => addr.slice(0, 6) + "..." + addr.slice(-4),
+}));
+
 // Mock the forms
 jest.mock("@/components/forms/ApproveForm", () => ({
   ApproveForm: ({ onSuccess }: { onSuccess: (txHash: string) => void }) => (
@@ -23,11 +43,23 @@ jest.mock("@/components/forms/TransferFromForm", () => ({
   ),
 }));
 
+import { useWallet } from "@/app/hooks/useWallet";
+
+beforeEach(() => {
+  (useWallet as jest.Mock).mockReturnValue({
+    connected: true,
+    publicKey: "GCPFGJGZOXPF5EZBQ7TGVGVW4ZBDAJT3RDSAICABJ7GCM3QQHLJNZ7PZ",
+    signTransaction: jest.fn().mockResolvedValue("signed-xdr"),
+    connect: jest.fn(),
+  });
+});
+
 describe("AllowanceManager", () => {
   it("renders the manager with all tabs", () => {
     render(<AllowanceManager />);
 
     expect(screen.getByText("Token Allowances")).toBeInTheDocument();
+    expect(screen.getByText("View Allowances")).toBeInTheDocument();
     expect(screen.getByText("Grant Allowance")).toBeInTheDocument();
     expect(screen.getByText("Revoke Allowance")).toBeInTheDocument();
     expect(screen.getByText("Transfer From")).toBeInTheDocument();

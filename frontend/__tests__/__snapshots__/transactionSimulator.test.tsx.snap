@@ -3,7 +3,10 @@
 exports[`Pre-flight Check Snapshots matches error display snapshot 1`] = `
 <div>
   <div
+    aria-atomic="true"
+    aria-live="polite"
     class="rounded-xl border border-red-500/30 bg-red-500/10 p-4"
+    role="status"
   >
     <div
       class="flex items-start gap-3"
@@ -66,7 +69,10 @@ exports[`Pre-flight Check Snapshots matches error display snapshot 1`] = `
 exports[`Pre-flight Check Snapshots matches success display snapshot 1`] = `
 <div>
   <div
+    aria-atomic="true"
+    aria-live="polite"
     class="rounded-xl border border-green-500/30 bg-green-500/10 p-4"
+    role="status"
   >
     <div
       class="flex items-center gap-3"
