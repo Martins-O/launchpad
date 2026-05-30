@@ -21,7 +21,7 @@ import { AdminPanel } from "./components/AdminPanel";
 import { useWallet } from "@/app/hooks/useWallet";
 import { HoldersTable, exportHoldersCsv } from "./components/HoldersTable";
 import { InfoCard } from "./components/InfoCard";
-import { ErrorState, LoadingState } from "./components/DashboardUi";
+import { ErrorState, LoadingState, NotATokenState } from "./components/DashboardUi";
 
 // ---------------------------------------------------------------------------
 // Main dashboard component
@@ -78,7 +78,11 @@ export default function TokenDashboard({ contractId }: { contractId: string }) {
     loadData();
   }, [loadData]);
 
+  const isInvalidToken =
+    error?.startsWith("Invalid token contract:") ?? false;
+
   if (loading) return <LoadingState />;
+  if (isInvalidToken) return <NotATokenState contractId={contractId} />;
   if (error) return <ErrorState message={error} onRetry={loadData} />;
   if (!tokenInfo) return null;
 

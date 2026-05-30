@@ -1,4 +1,6 @@
-import { Loader2, AlertCircle } from "lucide-react";
+import Link from "next/link";
+import { Loader2, AlertCircle, FileQuestion } from "lucide-react";
+import { truncateAddress } from "@/lib/stellar";
 
 export function LoadingState() {
   return (
@@ -23,6 +25,29 @@ export function ErrorState({
       <button onClick={onRetry} className="btn-secondary px-4 py-2 text-sm">
         Retry
       </button>
+    </div>
+  );
+}
+
+export function NotATokenState({ contractId }: { contractId: string }) {
+  return (
+    <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 text-center">
+      <FileQuestion className="h-12 w-12 text-amber-400" />
+      <h2 className="text-xl font-bold text-white">Not a SEP-41 Token</h2>
+      <p className="max-w-md text-gray-400">
+        The contract{" "}
+        <code className="text-stellar-300">{truncateAddress(contractId)}</code>{" "}
+        does not appear to implement the required SEP-41 token standard methods.
+      </p>
+      <p className="text-sm text-gray-500">
+        This dashboard only supports SEP-41 compliant token contracts.
+      </p>
+      <Link
+        href="/dashboard"
+        className="inline-flex items-center rounded-lg border border-white/10 bg-white/5 px-5 py-2.5 text-sm font-medium text-gray-300 transition-colors hover:border-stellar-400/30 hover:bg-stellar-500/10 hover:text-stellar-300"
+      >
+        Back to Search
+      </Link>
     </div>
   );
 }
