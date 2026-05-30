@@ -359,7 +359,14 @@ export default function DeployForm() {
               control={control}
             />
           )}
-          {currentStep === 4 && <StepReview control={control} />}
+          {currentStep === 4 && (
+            <StepReview
+              control={control}
+              estimatedFee={estimatedFee}
+              feeEstimationLoading={feeEstimationLoading}
+              feeEstimationError={feeEstimationError}
+            />
+          )}
         </div>
 
         {/* Fee Estimation (shown on review step) */}
@@ -445,6 +452,9 @@ export default function DeployForm() {
                       errors: result.errors,
                       warnings: result.warnings,
                     });
+                    if (result.estimatedFee) {
+                      setEstimatedFee(result.estimatedFee);
+                    }
                   } catch (error) {
                     const errorMessage =
                       error instanceof Error ? error.message : "Unknown error";
