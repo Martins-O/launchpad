@@ -187,9 +187,9 @@ export function TransferPanel({
       const rpc = new StellarSdk.rpc.Server(networkConfig.rpcUrl);
 
       // Convert amount to raw value (with decimals)
-      const rawAmount =
-        BigInt(Math.floor(parseFloat(data.amount) * 10 ** tokenDecimals)) *
-        BigInt(10 ** Math.max(0, 7 - tokenDecimals));
+      const rawAmount = BigInt(
+        Math.round(parseFloat(data.amount) * 10 ** tokenDecimals)
+      );
 
       // Build transaction
       const account = await rpc.getAccount(publicKey);
