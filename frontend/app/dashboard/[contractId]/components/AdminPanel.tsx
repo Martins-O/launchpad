@@ -79,9 +79,10 @@ interface AdminPanelProps {
     contractId: string;
     maxSupply?: string | null;
     totalSupply?: string;
+    decimals: number;
 }
 
-export function AdminPanel({ contractId, maxSupply, totalSupply }: AdminPanelProps) {
+export function AdminPanel({ contractId, maxSupply, totalSupply, decimals }: AdminPanelProps) {
     const { signTransaction, publicKey } = useWallet();
     const { networkConfig } = useNetwork();
     const toast = useToast();
@@ -197,7 +198,7 @@ export function AdminPanel({ contractId, maxSupply, totalSupply }: AdminPanelPro
 
             // Prepare ScVals for the new mint_batch function
             const addressesScVal = nativeToScVal(entries.map(e => new Address(e.address)), { type: "vec" });
-            const amountsScVal = nativeToScVal(entries.map(e => BigInt(e.amount)), { type: "vec" });
+            const amountsScVal = nativeToScVal(entries.map(e => BigInt(e.amount) * BigInt(10) ** BigInt(decimals)), { type: "vec" });
 
             const tx = new TransactionBuilder(account, {
                 fee: "1000",
@@ -262,11 +263,11 @@ export function AdminPanel({ contractId, maxSupply, totalSupply }: AdminPanelPro
             if (action === "mint") {
                 const mintData = data as MintData;
                 method = "mint";
-                args = [addressToScVal(mintData.to), i128ToScVal(BigInt(mintData.amount))];
+                args = [addressToScVal(mintData.to), i128ToScVal(BigInt(mintData.amount) * BigInt(10) ** BigInt(decimals))];
             } else if (action === "clawback") {
                 const burnData = data as BurnData;
                 method = "clawback";
-                args = [addressToScVal(burnData.from), i128ToScVal(BigInt(burnData.amount))];
+                args = [addressToScVal(burnData.from), i128ToScVal(BigInt(burnData.amount) * BigInt(10) ** BigInt(decimals))];
             } else if (action === "transfer") {
                 const transferData = data as TransferAdminData;
                 method = "set_admin";
@@ -287,7 +288,7 @@ export function AdminPanel({ contractId, maxSupply, totalSupply }: AdminPanelPro
 
                 args = [
                     addressToScVal(vestingData.recipient),
-                    i128ToScVal(BigInt(vestingData.amount)),
+                    i128ToScVal(BigInt(vestingData.amount) * BigInt(10) ** BigInt(decimals)),
                     nativeToScVal(cliffLedger, { type: "u32" }),
                     nativeToScVal(endLedger, { type: "u32" })
                 ];
