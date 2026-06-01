@@ -28,7 +28,7 @@ pub enum DataKey {
     Frozen(Address),
     IsPaused,
     /// Set to `true` after `revoke_admin` is called. Once locked, no admin
-    /// operation (mint, burn_admin, freeze, set_admin, propose_admin) can
+    /// operation (mint, burn_admin, freeze, propose_admin) can
     /// ever succeed again — the token becomes effectively immutable.
     Locked,
     AuthorizationRequired,
@@ -229,20 +229,11 @@ impl TokenContract {
         env.storage().instance().remove(&DataKey::PendingAdmin);
     }
 
-    /// Transfer admin role instantly.
-    /// TODO (issue #2): replace with two-step propose_admin / accept_admin.
-    pub fn set_admin(env: Env, new_admin: Address) {
-        Self::_require_admin(&env);
-        env.storage().instance().set(&DataKey::Admin, &new_admin);
-        env.events()
-            .publish((symbol_short!("set_admin"),), new_admin);
-    }
-
     /// Permanently revoke the admin role and lock the contract.
     ///
     /// After this call:
     /// - No further `mint`, `burn_admin`, `freeze`, `unfreeze`,
-    ///   `set_admin`, `propose_admin`, `accept_admin`, `pause`, or
+    ///   `propose_admin`, `accept_admin`, `pause`, or
     ///   `unpause` operation can ever succeed.
     /// - The Admin storage entry is removed and a `Locked` flag is set.
     /// - `is_locked()` returns `true` from then on.
@@ -1269,15 +1260,6 @@ mod test {
         let (_, client, admin, _) = setup();
         client.revoke_admin();
         client.burn_admin(&admin, &1i128);
-    }
-
-    #[test]
-    #[should_panic(expected = "admin revoked: contract is locked")]
-    fn test_set_admin_after_revoke_panics() {
-        let (env, client, _, _) = setup();
-        let other = Address::generate(&env);
-        client.revoke_admin();
-        client.set_admin(&other);
     }
 
     #[test]

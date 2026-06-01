@@ -128,6 +128,30 @@ export default function TokenDashboard({ contractId }: { contractId: string }) {
         </div>
       </section>
 
+      {/* Metadata URI */}
+      {tokenInfo.contractUri && (
+        <section aria-label="Metadata URI" className="mb-10">
+          <h2 className="mb-4 text-sm font-medium uppercase tracking-wider text-gray-500">
+            Metadata
+          </h2>
+          <div className="glass-card flex flex-col gap-1 p-4">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium uppercase tracking-wider text-gray-500">
+                URI
+              </span>
+            </div>
+            <a
+              href={tokenInfo.contractUri}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="truncate text-lg font-semibold text-stellar-400 hover:text-stellar-300 transition-colors"
+            >
+              {tokenInfo.contractUri}
+            </a>
+          </div>
+        </section>
+      )}
+
       {/* User Actions Panel (Burn Tokens) */}
       <UserPanel contractId={contractId} decimals={tokenInfo.decimals} />
 
