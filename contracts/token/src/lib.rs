@@ -25,7 +25,6 @@ pub enum DataKey {
     ContractUri,
     Balance(Address),
     Allowance(Address, Address), // (owner, spender)
-    Nonce(Address),              // For permit functionality
     Frozen(Address),
     IsPaused,
     /// Set to `true` after `revoke_admin` is called. Once locked, no admin
@@ -434,78 +433,6 @@ impl TokenContract {
 
         env.events()
             .publish((symbol_short!("approve"), from, spender), amount);
-    }
-
-    /// Permit function allowing off-chain signature-based approvals (similar to EIP-2612).
-    /// This allows users to sign an approval off-chain, and a relayer or spender can
-    /// submit this signature to gain allowance without requiring an on-chain approve transaction.
-    ///
-    /// Note: This is a simplified implementation. In production, proper cryptographic
-    /// signature verification should be implemented.
-    pub fn permit(
-        env: Env,
-        owner: Address,
-        spender: Address,
-        amount: i128,
-        expiration_ledger: u32,
-        nonce: u64,
-        _signature: BytesN<64>, // Signature parameter for future implementation
-    ) {
-        assert!(amount >= 0, "amount must be non-negative");
-
-        // Check that the permit hasn't expired
-        let current_ledger = env.ledger().sequence();
-        assert!(expiration_ledger >= current_ledger, "permit expired");
-
-        // Get and verify nonce
-        let nonce_key = DataKey::Nonce(owner.clone());
-        let current_nonce: u64 = env.storage().persistent().get(&nonce_key).unwrap_or(0);
-        assert!(nonce == current_nonce, "invalid nonce");
-
-        // Increment nonce to prevent replay attacks
-        env.storage()
-            .persistent()
-            .set(&nonce_key, &(current_nonce + 1));
-
-        // TODO: In a production implementation, verify the signature here
-        // This would involve:
-        // 1. Creating a standardized message format
-        // 2. Hashing the message
-        // 3. Verifying the signature against the owner's public key
-
-        // For now, we require the owner to authorize this call
-        // This provides security while we implement proper signature verification
-        owner.require_auth();
-
-        // Set the allowance
-        let allowance_key = DataKey::Allowance(owner.clone(), spender.clone());
-        env.storage().persistent().set(&allowance_key, &amount);
-
-        // Extend TTL for the allowance key
-        let ttl_ledgers = if expiration_ledger > current_ledger {
-            expiration_ledger - current_ledger
-        } else {
-            // Default TTL: 52 weeks in ledgers (assuming 5-second ledgers)
-            52 * 7 * 24 * 60 / 5
-        };
-
-        env.storage()
-            .persistent()
-            .extend_ttl(&allowance_key, ttl_ledgers, ttl_ledgers);
-
-        // Extend TTL for nonce key
-        env.storage()
-            .persistent()
-            .extend_ttl(&nonce_key, ttl_ledgers, ttl_ledgers);
-
-        env.events()
-            .publish((symbol_short!("permit"), owner, spender), amount);
-    }
-
-    /// Get the current nonce for an address (used for permit functionality)
-    pub fn nonce(env: Env, owner: Address) -> u64 {
-        let key = DataKey::Nonce(owner);
-        env.storage().persistent().get(&key).unwrap_or(0)
     }
 
     /// Transfer `amount` from `from` to `to` using `spender`'s allowance.
@@ -1236,100 +1163,6 @@ mod test {
 
         client.approve(&admin, &spender, &10i128, &1000u32);
         client.transfer_from(&spender, &admin, &user, &11i128);
-    }
-
-    #[test]
-    fn test_permit_functionality() {
-        let (env, client, admin, _user) = setup();
-        let spender = Address::generate(&env);
-
-        // Check initial nonce is 0
-        assert_eq!(client.nonce(&admin), 0);
-
-        // Create permit parameters
-        let amount = 100_0000000i128;
-        let expiration_ledger = env.ledger().sequence() + 1000;
-        let nonce = 0u64;
-
-        // Create a mock signature (64 bytes of zeros)
-        let signature = BytesN::from_array(&env, &[0u8; 64]);
-
-        // Test permit functionality
-        // Note: This will require auth from the owner since we haven't implemented
-        // full signature verification yet
-        client.permit(
-            &admin,
-            &spender,
-            &amount,
-            &expiration_ledger,
-            &nonce,
-            &signature,
-        );
-
-        // Check that allowance was set
-        assert_eq!(client.allowance(&admin, &spender), amount);
-
-        // Check that nonce was incremented
-        assert_eq!(client.nonce(&admin), 1);
-    }
-
-    #[test]
-    fn test_permit_nonce_validation() {
-        let (env, client, admin, _user) = setup();
-        let spender = Address::generate(&env);
-
-        // Test that nonce getter works correctly
-        assert_eq!(client.nonce(&admin), 0);
-
-        // Test with another user
-        let another_user = Address::generate(&env);
-        assert_eq!(client.nonce(&another_user), 0); // Should be 0 for new addresses
-
-        // Create permit to increment nonce
-        let amount = 50_0000000i128;
-        let expiration_ledger = env.ledger().sequence() + 1000;
-        let signature = BytesN::from_array(&env, &[0u8; 64]);
-
-        client.permit(
-            &admin,
-            &spender,
-            &amount,
-            &expiration_ledger,
-            &0u64,
-            &signature,
-        );
-        assert_eq!(client.nonce(&admin), 1);
-    }
-
-    #[test]
-    #[should_panic(expected = "invalid nonce")]
-    fn test_permit_invalid_nonce() {
-        let (env, client, admin, _user) = setup();
-        let spender = Address::generate(&env);
-
-        let amount = 50_0000000i128;
-        let expiration_ledger = env.ledger().sequence() + 1000;
-        let signature = BytesN::from_array(&env, &[0u8; 64]);
-
-        // First permit with nonce 0 should work
-        client.permit(
-            &admin,
-            &spender,
-            &amount,
-            &expiration_ledger,
-            &0u64,
-            &signature,
-        );
-
-        // Second permit with same nonce should fail
-        client.permit(
-            &admin,
-            &spender,
-            &amount,
-            &expiration_ledger,
-            &0u64,
-            &signature,
-        );
     }
 
     #[test]
