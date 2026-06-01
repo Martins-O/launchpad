@@ -15,6 +15,7 @@ pub enum DataKey {
     IsPaused,
     Schedule(Address, u32),
     ScheduleCount(Address),
+    Recipients,
 }
 
 #[derive(Clone, Debug)]
@@ -153,6 +154,11 @@ impl VestingContract {
         Self::_extend_persistent_ttl(&env, &key, ttl_ledgers);
         Self::_set_schedule_count(&env, &recipient, schedule_index + 1, ttl_ledgers);
 
+        // Track the recipient in the recipients list (only if new to this contract)
+        if schedule_index == 0 {
+            Self::_add_recipient(&env, &recipient);
+        }
+
         env.events()
             .publish((symbol_short!("create"), recipient), total_amount);
     }
@@ -230,6 +236,11 @@ impl VestingContract {
             };
             Self::_extend_persistent_ttl(&env, &key, ttl_ledgers);
             Self::_set_schedule_count(&env, &input.recipient, schedule_index + 1, ttl_ledgers);
+
+            // Track the recipient in the recipients list (only if new to this contract)
+            if schedule_index == 0 {
+                Self::_add_recipient(&env, &input.recipient);
+            }
 
             env.events().publish(
                 (symbol_short!("create"), input.recipient.clone()),
@@ -412,6 +423,51 @@ impl VestingContract {
         schedule
     }
 
+    /// Return all recipients who have vesting schedules.
+    pub fn get_recipients(env: Env) -> Vec<Address> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Recipients)
+            .unwrap_or(Vec::new(&env))
+    }
+
+    /// Return paginated list of recipients with vesting schedules.
+    ///
+    /// `start` — zero-based offset into the recipients list.
+    /// `limit` — maximum number of recipients to return.
+    pub fn get_recipients_paginated(
+        env: Env,
+        start: u32,
+        limit: u32,
+    ) -> Vec<Address> {
+        let all_recipients = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Recipients)
+            .unwrap_or(Vec::new(&env));
+
+        let total = all_recipients.len();
+        let end = if start + limit > total {
+            total
+        } else {
+            start + limit
+        };
+
+        if start >= total {
+            return Vec::new(&env);
+        }
+
+        let mut paginated = Vec::new(&env);
+        let mut i = start;
+        while i < end {
+            if let Some(recipient) = all_recipients.get(i) {
+                paginated.push_back(recipient);
+            }
+            i += 1;
+        }
+        paginated
+    }
+
     // ── Internals ───────────────────────────────────────────────────────
 
     fn _require_admin(env: &Env) {
@@ -514,6 +570,31 @@ impl VestingContract {
         let elapsed = (current - schedule.cliff_ledger) as i128;
         let duration = (schedule.end_ledger - schedule.cliff_ledger) as i128;
         schedule.total_amount * elapsed / duration
+    }
+
+    fn _add_recipient(env: &Env, recipient: &Address) {
+        let mut recipients = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Recipients)
+            .unwrap_or(Vec::new(env));
+
+        // Check if recipient is already in the list
+        for r in recipients.iter() {
+            if r == *recipient {
+                return; // Already tracked, skip
+            }
+        }
+
+        // Add new recipient
+        recipients.push_back(recipient.clone());
+        env.storage()
+            .persistent()
+            .set(&DataKey::Recipients, &recipients);
+
+        // Extend TTL for the recipients list
+        let ttl_ledgers = 52 * 7 * 24 * 60 / 5; // ~1 year in ledger units
+        Self::_extend_persistent_ttl(env, &DataKey::Recipients, ttl_ledgers);
     }
 }
 
