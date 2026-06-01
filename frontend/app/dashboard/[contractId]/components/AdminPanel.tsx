@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/Input";
 import { useWallet } from "../../../hooks/useWallet";
 import { useNetwork } from "../../../providers/NetworkProvider";
 import { useToast } from "../../../providers/ToastProvider";
-import { useTransactionSimulator } from "../../../hooks/useTransactionSimulator";
+import { useTransactionSimulator } from "@/hooks/useTransactionSimulator";
 import {
   addressToScVal,
   i128ToScVal,
@@ -269,12 +269,19 @@ export function AdminPanel({ contractId, maxSupply, totalSupply, decimals }: Adm
         }
     };
 
+    const simulator = useTransactionSimulator();
+    const [mintPreflight, setMintPreflight] = useState<PreflightCheckResult | null>(null);
+    const [burnPreflight, setBurnPreflight] = useState<PreflightCheckResult | null>(null);
+    const [transferPreflight, setTransferPreflight] = useState<PreflightCheckResult | null>(null);
+    const [vestingPreflight, setVestingPreflight] = useState<PreflightCheckResult | null>(null);
+
     const handleAction = async (action: string, data: AdminActionData) => {
         if (!publicKey) return;
 
         setLoading(action);
         setSuccess(null);
         setLastTxHash(null);
+
         const statusLabel =
             action === "mint"
                 ? "Mint"
@@ -287,27 +294,56 @@ export function AdminPanel({ contractId, maxSupply, totalSupply, decimals }: Adm
         try {
             const server = new rpc.Server(networkConfig.rpcUrl);
 
-            // 1. Prepare Arguments
             let method = "";
             let args: xdr.ScVal[] = [];
+            let targetContractId = contractId;
+            let simulationResult: PreflightCheckResult | null = null;
 
             if (action === "mint") {
                 const mintData = data as MintData;
                 method = "mint";
-                args = [addressToScVal(mintData.to), i128ToScVal(BigInt(mintData.amount) * BigInt(10) ** BigInt(decimals))];
+                const scaledAmount =
+                    BigInt(mintData.amount) * BigInt(10) ** BigInt(decimals);
+                args = [addressToScVal(mintData.to), i128ToScVal(scaledAmount)];
+
+                simulationResult = await simulator.checkMint(
+                    contractId,
+                    mintData.to,
+                    scaledAmount,
+                    publicKey,
+                );
+                setMintPreflight(simulationResult);
             } else if (action === "clawback") {
                 const burnData = data as BurnData;
                 method = "clawback";
-                args = [addressToScVal(burnData.from), i128ToScVal(BigInt(burnData.amount) * BigInt(10) ** BigInt(decimals))];
+                const scaledAmount =
+                    BigInt(burnData.amount) * BigInt(10) ** BigInt(decimals);
+                args = [addressToScVal(burnData.from), i128ToScVal(scaledAmount)];
+
+                simulationResult = await simulator.simulateContract(
+                    contractId,
+                    method,
+                    args,
+                    publicKey,
+                );
+                setBurnPreflight(simulationResult);
             } else if (action === "transfer") {
                 const transferData = data as TransferAdminData;
                 method = "set_admin";
                 args = [addressToScVal(transferData.newAdmin)];
+
+                simulationResult = await simulator.simulateContract(
+                    contractId,
+                    method,
+                    args,
+                    publicKey,
+                );
+                setTransferPreflight(simulationResult);
             } else if (action === "vesting") {
                 const vestingData = data as VestingData;
                 method = "create_schedule";
+                targetContractId = vestingData.vestingContract;
 
-                // Ledger logic: 1 day ≈ 17,280 ledgers
                 const currentLedgerRes = await server.getLatestLedger();
                 const currentLedger = currentLedgerRes.sequence;
 
@@ -317,52 +353,83 @@ export function AdminPanel({ contractId, maxSupply, totalSupply, decimals }: Adm
                 const cliffLedger = currentLedger + cliffLedgers;
                 const endLedger = cliffLedger + durationLedgers;
 
+                const scaledAmount =
+                    BigInt(vestingData.amount) * BigInt(10) ** BigInt(decimals);
+
                 args = [
                     addressToScVal(vestingData.recipient),
-                    i128ToScVal(BigInt(vestingData.amount) * BigInt(10) ** BigInt(decimals)),
+                    i128ToScVal(scaledAmount),
                     nativeToScVal(cliffLedger, { type: "u32" }),
-                    nativeToScVal(endLedger, { type: "u32" })
+                    nativeToScVal(endLedger, { type: "u32" }),
                 ];
+
+                simulationResult = await simulator.checkCreateSchedule(
+                    vestingData.vestingContract,
+                    vestingData.recipient,
+                    scaledAmount,
+                    cliffLedger,
+                    endLedger,
+                    publicKey,
+                );
+                setVestingPreflight(simulationResult);
+            } else {
+                throw new Error("Unsupported action");
             }
 
-            // 2. Build Transaction using Contract class
-            const targetContractId = action === "vesting" ? (data as VestingData).vestingContract : contractId;
+            if (simulationResult?.errors?.length) {
+                toast.show({
+                    title: `${statusLabel} simulation failed`,
+                    message: simulationResult.errors[0],
+                    variant: "error",
+                });
+                return;
+            }
+
             const account = await server.getAccount(publicKey);
             const contract = new Contract(targetContractId);
 
             const tx = new TransactionBuilder(account, {
-                fee: "1000", // Standard fee
-                networkPassphrase: networkConfig.passphrase
+                fee: "1000",
+                networkPassphrase: networkConfig.passphrase,
             })
                 .addOperation(contract.call(method, ...args))
                 .setTimeout(30)
                 .build();
 
-            // 3. Sign and Submit
-            const xdrEncoded = tx.toXDR();
-            console.log(`Signing ${action} tx for ${contractId}`);
-
-            // Note: signTransaction's first argument is the XDR string
-            let signedXdr: string;
-            try {
-                signedXdr = await signTransaction(xdrEncoded, { networkPassphrase: networkConfig.passphrase });
-            } catch (signError) {
-                setAnnouncement(`${statusLabel} signing failed.`);
-                throw signError;
+            const sim = await server.simulateTransaction(tx);
+            if (rpc.Api.isSimulationError(sim)) {
+                throw new Error(`Simulation failed: ${sim.error}`);
             }
+            const prepared = rpc.assembleTransaction(tx, sim).build();
+
+            const signedXdr = await signTransaction(prepared.toXDR(), {
+                networkPassphrase: networkConfig.passphrase,
+            });
 
             const txHash = await submitSignedTransaction(signedXdr);
             setLastTxHash(txHash);
             setSuccess(action);
-            setAnnouncement(`${statusLabel} transaction submitted successfully. Transaction hash ${txHash}.`);
+            setAnnouncement(
+                `${statusLabel} transaction submitted successfully. Transaction hash ${txHash}.`,
+            );
 
-            if (action === "mint") mintForm.reset();
-            if (action === "clawback") burnForm.reset();
+            if (action === "mint") {
+                mintForm.reset();
+                setMintPreflight(null);
+            }
+            if (action === "clawback") {
+                burnForm.reset();
+                setBurnPreflight(null);
+            }
             if (action === "transfer") {
                 transferForm.reset();
                 setShowTransferConfirm(false);
+                setTransferPreflight(null);
             }
-            if (action === "vesting") vestingForm.reset();
+            if (action === "vesting") {
+                vestingForm.reset();
+                setVestingPreflight(null);
+            }
         } catch (err) {
             const error = err as Error;
             console.error(`${action} failed:`, error);
@@ -375,140 +442,7 @@ export function AdminPanel({ contractId, maxSupply, totalSupply, decimals }: Adm
         } finally {
             setLoading(null);
         }
-      } else if (action === "transfer") {
-        const transferData = data as TransferAdminData;
-        method = "set_admin";
-        args = [addressToScVal(transferData.newAdmin)];
-
-        // Run simulation for set_admin
-        simulationResult = await simulator.simulateContract(
-          contractId,
-          "set_admin",
-          args,
-          publicKey,
-        );
-        setTransferPreflight(simulationResult);
-
-        if (simulationResult.errors && simulationResult.errors.length > 0) {
-          toast.show({
-            title: `${statusLabel} simulation failed`,
-            message: simulationResult.errors[0],
-            variant: "error",
-          });
-          return;
-        }
-      } else if (action === "vesting") {
-        const vestingData = data as VestingData;
-        method = "create_schedule";
-
-        // Ledger logic: 1 day ≈ 17,280 ledgers
-        const currentLedgerRes = await server.getLatestLedger();
-        const currentLedger = currentLedgerRes.sequence;
-
-        const cliffLedgers = Math.round(Number(vestingData.cliffDays) * 17280);
-        const durationLedgers = Math.round(
-          Number(vestingData.durationDays) * 17280,
-        );
-
-        const cliffLedger = currentLedger + cliffLedgers;
-        const endLedger = cliffLedger + durationLedgers;
-
-        args = [
-          addressToScVal(vestingData.recipient),
-          i128ToScVal(BigInt(vestingData.amount)),
-          nativeToScVal(cliffLedger, { type: "u32" }),
-          nativeToScVal(endLedger, { type: "u32" }),
-        ];
-
-        // Run simulation
-        simulationResult = await simulator.checkCreateSchedule(
-          vestingData.vestingContract,
-          vestingData.recipient,
-          BigInt(vestingData.amount),
-          cliffLedger,
-          endLedger,
-          publicKey,
-        );
-        setVestingPreflight(simulationResult);
-
-        if (simulationResult.errors && simulationResult.errors.length > 0) {
-          toast.show({
-            title: `${statusLabel} simulation failed`,
-            message: simulationResult.errors[0],
-            variant: "error",
-          });
-          return;
-        }
-      }
-
-      // 2. Build Transaction using Contract class
-      const targetContractId =
-        action === "vesting"
-          ? (data as VestingData).vestingContract
-          : contractId;
-      const account = await server.getAccount(publicKey);
-      const contract = new Contract(targetContractId);
-
-      const tx = new TransactionBuilder(account, {
-        fee: "1000", // Standard fee
-        networkPassphrase: networkConfig.passphrase,
-      })
-        .addOperation(contract.call(method, ...args))
-        .setTimeout(30)
-        .build();
-
-      // 3. Sign and Submit
-      const xdrEncoded = tx.toXDR();
-      console.log(`Signing ${action} tx for ${contractId}`);
-
-      // Note: signTransaction's first argument is the XDR string
-      let signedXdr: string;
-      try {
-        signedXdr = await signTransaction(xdrEncoded, {
-          networkPassphrase: networkConfig.passphrase,
-        });
-      } catch (signError) {
-        setAnnouncement(`${statusLabel} signing failed.`);
-        throw signError;
-      }
-
-      const txHash = await submitSignedTransaction(signedXdr);
-      setLastTxHash(txHash);
-      setSuccess(action);
-      setAnnouncement(
-        `${statusLabel} transaction submitted successfully. Transaction hash ${txHash}.`,
-      );
-
-      if (action === "mint") {
-        mintForm.reset();
-        setMintPreflight(null);
-      }
-      if (action === "clawback") {
-        burnForm.reset();
-        setBurnPreflight(null);
-      }
-      if (action === "transfer") {
-        transferForm.reset();
-        setShowTransferConfirm(false);
-        setTransferPreflight(null);
-      }
-      if (action === "vesting") {
-        vestingForm.reset();
-        setVestingPreflight(null);
-      }
-    } catch (err) {
-      const error = err as Error;
-      console.error(`${action} failed:`, error);
-      setAnnouncement(`${statusLabel} transaction failed.`);
-      toast.show({
-        title: `${statusLabel} failed`,
-        message: error.message,
-        variant: "error",
-      });
-    } finally {
-      setLoading(null);
-    }
-  };
+    };
 
   /* ── Revoke admin / lock token ─────────────────────────────────── */
   const handleRevokeAdmin = async () => {
