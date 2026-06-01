@@ -272,11 +272,12 @@ impl VestingContract {
         env.storage().persistent().set(&key, &schedule);
 
         // Extend TTL for the schedule to prevent archiving
-        let ttl_ledgers = schedule.end_ledger - env.ledger().sequence();
-        if ttl_ledgers > 0 {
+        // saturating_sub prevents u32 underflow when the schedule has fully vested (current_ledger > end_ledger)
+        let remaining_ledgers = schedule.end_ledger.saturating_sub(env.ledger().sequence());
+        if remaining_ledgers > 0 {
             env.storage()
                 .persistent()
-                .extend_ttl(&key, ttl_ledgers as u32, ttl_ledgers as u32);
+                .extend_ttl(&key, remaining_ledgers, remaining_ledgers);
         }
 
         // Transfer tokens from the vesting contract to the recipient via
@@ -619,6 +620,129 @@ mod test {
         client.release(&recipient);
         client.release(&recipient);
     }
+
+    // ── Regression tests for issue #215: u32 underflow in release() ────
+
+    #[test]
+    fn test_release_after_full_vesting() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register_contract(None, VestingContract);
+        let client = VestingContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let token_addr = env.register_stellar_asset_contract(admin.clone());
+        let token_client = soroban_sdk::token::Client::new(&env, &token_addr);
+        let asset_client = soroban_sdk::token::StellarAssetClient::new(&env, &token_addr);
+
+        client.initialize(&admin, &token_addr);
+        asset_client.mint(&admin, &1000);
+
+        // Create schedule: cliff at 100, end at 200
+        client.create_schedule(&recipient, &1000, &100, &200);
+
+        // Advance past end_ledger to simulate fully vested schedule
+        env.ledger().set_sequence_number(250);
+
+        // This should succeed without u32 underflow
+        client.release(&recipient);
+
+        // Verify full amount was released
+        assert_eq!(client.released_amount(&recipient), 1000);
+        assert_eq!(token_client.balance(&recipient), 1000);
+    }
+
+    #[test]
+    fn test_release_at_exact_end_ledger() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register_contract(None, VestingContract);
+        let client = VestingContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let token_addr = env.register_stellar_asset_contract(admin.clone());
+        let token_client = soroban_sdk::token::Client::new(&env, &token_addr);
+        let asset_client = soroban_sdk::token::StellarAssetClient::new(&env, &token_addr);
+
+        client.initialize(&admin, &token_addr);
+        asset_client.mint(&admin, &1000);
+
+        client.create_schedule(&recipient, &1000, &100, &200);
+
+        // Advance to exactly end_ledger
+        env.ledger().set_sequence_number(200);
+
+        client.release(&recipient);
+
+        // Verify full amount was released
+        assert_eq!(client.released_amount(&recipient), 1000);
+        assert_eq!(token_client.balance(&recipient), 1000);
+    }
+
+    #[test]
+    fn test_release_one_ledger_before_end() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register_contract(None, VestingContract);
+        let client = VestingContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let token_addr = env.register_stellar_asset_contract(admin.clone());
+        let token_client = soroban_sdk::token::Client::new(&env, &token_addr);
+        let asset_client = soroban_sdk::token::StellarAssetClient::new(&env, &token_addr);
+
+        client.initialize(&admin, &token_addr);
+        asset_client.mint(&admin, &1000);
+
+        client.create_schedule(&recipient, &1000, &100, &200);
+
+        // Advance to one ledger before end
+        env.ledger().set_sequence_number(199);
+
+        client.release(&recipient);
+
+        // Verify nearly full amount was released (990 out of 1000)
+        assert_eq!(client.released_amount(&recipient), 990);
+        assert_eq!(token_client.balance(&recipient), 990);
+    }
+
+    #[test]
+    fn test_release_far_past_end_ledger() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register_contract(None, VestingContract);
+        let client = VestingContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let token_addr = env.register_stellar_asset_contract(admin.clone());
+        let token_client = soroban_sdk::token::Client::new(&env, &token_addr);
+        let asset_client = soroban_sdk::token::StellarAssetClient::new(&env, &token_addr);
+
+        client.initialize(&admin, &token_addr);
+        asset_client.mint(&admin, &1000);
+
+        client.create_schedule(&recipient, &1000, &100, &200);
+
+        // Advance well past end_ledger (simulating a schedule left unclaimed for some time)
+        // Using 500 to avoid test environment archiving issues while still testing the fix
+        env.ledger().set_sequence_number(500);
+
+        // This should succeed without u32 underflow
+        client.release(&recipient);
+
+        assert_eq!(client.released_amount(&recipient), 1000);
+        assert_eq!(token_client.balance(&recipient), 1000);
+    }
+
+    // ────────────────────────────────────────────────────────────────────
 
     #[test]
     fn test_revoke_transfers_correctly() {
