@@ -370,8 +370,10 @@ impl TokenContract {
             new_wasm_hash != BytesN::from_array(&env, &[0; 32]),
             "invalid wasm hash"
         );
-        env.deployer().update_current_contract_wasm(new_wasm_hash);
-        env.events().publish((symbol_short!("upgrade"),), true);
+        env.deployer()
+            .update_current_contract_wasm(new_wasm_hash.clone());
+        env.events()
+            .publish((symbol_short!("upgrade"),), new_wasm_hash);
     }
 
     // ── Token operations ────────────────────────────────────────────────
