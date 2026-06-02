@@ -369,11 +369,14 @@ impl VestingContract {
             "new_cliff must be before end_ledger"
         );
 
+        // Capture old value before mutation
+        let old_cliff = schedule.cliff_ledger;
         schedule.cliff_ledger = new_cliff;
         env.storage().persistent().set(&key, &schedule);
 
+        // Emit event with tuple payload
         env.events()
-            .publish((symbol_short!("clf_ext"), recipient), new_cliff);
+            .publish((symbol_short!("clf_ext"), recipient), (old_cliff, new_cliff));
     }
 
     // ── Read-only queries ───────────────────────────────────────────────
@@ -1039,6 +1042,17 @@ mod test {
         let schedule = get_schedule_latest(&client, &recipient);
         assert_eq!(schedule.cliff_ledger, 150);
         assert_eq!(schedule.end_ledger, 200); // unchanged
+
+        // Verify event emission contains (old_cliff, new_cliff)
+        use soroban_sdk::IntoVal;
+        assert_eq!(
+            env.events().all().last(),
+            Some((
+                contract_id,
+                (symbol_short!("clf_ext"), recipient).into_val(&env),
+                (100u32, 150u32).into_val(&env)
+            ))
+        );
     }
 
     #[test]
