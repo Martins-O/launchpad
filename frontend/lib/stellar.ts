@@ -643,7 +643,7 @@ export async function fetchTopHolders(
 
     return parsed.map(({ address, rawBalance }) => ({
       address,
-      balance: (Number(rawBalance) / 10 ** decimals).toFixed(decimals),
+      balance: formatTokenAmount(rawBalance.toString(), decimals),
       sharePercent:
         totalSupplyRaw > BigInt(0)
           ? Number((rawBalance * BigInt(10000)) / totalSupplyRaw) / 100
