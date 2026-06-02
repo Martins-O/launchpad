@@ -574,6 +574,21 @@ impl TokenContract {
             .publish((symbol_short!("set_max_b"),), max_balance_per_account);
     }
 
+    /// Set, update, or remove the optional compliance node address.
+    /// Admin only. Pass `None` to remove the compliance node.
+    pub fn set_compliance_node(env: Env, node: Option<Address>) {
+        Self::_require_admin(&env);
+
+        if let Some(addr) = node.clone() {
+            env.storage().instance().set(&DataKey::ComplianceNode, &addr);
+        } else {
+            env.storage().instance().remove(&DataKey::ComplianceNode);
+        }
+
+        env.events()
+            .publish((symbol_short!("set_compliance_node"),), node);
+    }
+
     /// Returns `true` if the contract is currently paused.
     pub fn is_paused(env: Env) -> bool {
         env.storage()
@@ -1741,5 +1756,17 @@ mod test {
         // Supply a valid future expiration; the allowance should be stored correctly.
         client.approve(&admin, &spender, &500i128, &100u32);
         assert_eq!(client.allowance(&admin, &spender), 500i128);
+    }
+
+    #[test]
+    fn test_set_and_remove_compliance_node() {
+        let (env, client, _, _) = setup();
+        let node = Address::generate(&env);
+
+        client.set_compliance_node(&Some(node.clone()));
+        assert_eq!(client.compliance_node(), Some(node.clone()));
+
+        client.set_compliance_node(&None);
+        assert_eq!(client.compliance_node(), None);
     }
 }

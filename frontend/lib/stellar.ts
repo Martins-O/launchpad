@@ -29,6 +29,7 @@ export interface TokenInfo {
   contractId: string;
   maxSupply?: string | null;
   contractUri?: string;
+  complianceNode?: string | null;
 }
 
 export interface TokenHolder {
@@ -513,6 +514,16 @@ async function _fetchTokenInfo(
     // contract_uri not set or not accessible
   }
 
+  let complianceNode: string | null = null;
+  try {
+    const nodeVal = await simulateCall(contractId, "compliance_node", config);
+    if (nodeVal && nodeVal.switch() !== StellarSdk.xdr.ScValType.scvVoid()) {
+      complianceNode = decodeAddress(nodeVal);
+    }
+  } catch {
+    // compliance_node may not be implemented or accessible; ignore.
+  }
+
   return {
     name: decodeString(nameVal),
     symbol: decodeString(symbolVal),
@@ -523,6 +534,7 @@ async function _fetchTokenInfo(
     contractId,
     maxSupply,
     contractUri,
+    complianceNode,
   };
 }
 
