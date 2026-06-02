@@ -97,12 +97,20 @@ const vestingSchema = z.object({
     ),
 });
 
+const metadataUriSchema = z.object({
+  uri: z
+    .string()
+    .url("Must be a valid URL")
+    .min(1, "URI is required"),
+});
+
 type MintData = z.infer<typeof mintSchema>;
 type BurnData = z.infer<typeof burnSchema>;
 type TransferAdminData = z.infer<typeof transferAdminSchema>;
 type VestingData = z.infer<typeof vestingSchema>;
+type MetadataUriData = z.infer<typeof metadataUriSchema>;
 
-type AdminActionData = MintData | BurnData | TransferAdminData | VestingData;
+type AdminActionData = MintData | BurnData | TransferAdminData | VestingData | MetadataUriData;
 
 /* ── AdminPanel Component ───────────────────────────────────────── */
 
@@ -136,6 +144,7 @@ export function AdminPanel({ contractId, maxSupply, totalSupply, decimals }: Adm
     const burnForm = useForm<BurnData>({ resolver: zodResolver(burnSchema) });
     const transferForm = useForm<TransferAdminData>({ resolver: zodResolver(transferAdminSchema) });
     const vestingForm = useForm<VestingData>({ resolver: zodResolver(vestingSchema) });
+    const metadataUriForm = useForm<MetadataUriData>({ resolver: zodResolver(metadataUriSchema) });
 
     // Live values for the vesting curve preview chart.
     const [watchedCliff, watchedDuration] = vestingForm.watch(["cliffDays", "durationDays"]);
@@ -289,7 +298,9 @@ export function AdminPanel({ contractId, maxSupply, totalSupply, decimals }: Adm
                   ? "Clawback"
                   : action === "transfer"
                     ? "Transfer admin"
-                    : "Vesting";
+                    : action === "metadata-uri"
+                      ? "Update metadata URI"
+                      : "Vesting";
 
         try {
             const server = new rpc.Server(networkConfig.rpcUrl);
@@ -329,7 +340,7 @@ export function AdminPanel({ contractId, maxSupply, totalSupply, decimals }: Adm
                 setBurnPreflight(simulationResult);
             } else if (action === "transfer") {
                 const transferData = data as TransferAdminData;
-                method = "set_admin";
+                method = "propose_admin";
                 args = [addressToScVal(transferData.newAdmin)];
 
                 simulationResult = await simulator.simulateContract(
@@ -372,6 +383,17 @@ export function AdminPanel({ contractId, maxSupply, totalSupply, decimals }: Adm
                     publicKey,
                 );
                 setVestingPreflight(simulationResult);
+            } else if (action === "metadata-uri") {
+                const metadataData = data as MetadataUriData;
+                method = "update_contract_uri";
+                args = [nativeToScVal(metadataData.uri, { type: "string" })];
+
+                simulationResult = await simulator.simulateContract(
+                    contractId,
+                    method,
+                    args,
+                    publicKey,
+                );
             } else {
                 throw new Error("Unsupported action");
             }
@@ -425,6 +447,9 @@ export function AdminPanel({ contractId, maxSupply, totalSupply, decimals }: Adm
                 transferForm.reset();
                 setShowTransferConfirm(false);
                 setTransferPreflight(null);
+            }
+            if (action === "metadata-uri") {
+                metadataUriForm.reset();
             }
             if (action === "vesting") {
                 vestingForm.reset();
@@ -1069,6 +1094,45 @@ export function AdminPanel({ contractId, maxSupply, totalSupply, decimals }: Adm
               </div>
             </div>
           )}
+        </div>
+
+        {/* ── Update Metadata URI ──────────────────────────────── */}
+        <div className="glass-card p-6 flex flex-col hover:border-stellar-500/30 transition-all duration-300 group">
+          <div className="flex items-center gap-2 mb-6 text-stellar-300">
+            <div className="p-2 bg-stellar-500/10 rounded-lg group-hover:scale-110 transition-transform">
+              <ExternalLink className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="font-bold text-lg">Metadata URI</h3>
+              <p className="text-xs text-gray-400 mt-0.5">
+                Set or update the URI pointing to off-chain token metadata (logo, description, etc.)
+              </p>
+            </div>
+          </div>
+
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleAction("metadata-uri", metadataUriForm.getValues());
+            }}
+            className="flex flex-col gap-4"
+          >
+            <Input
+              {...metadataUriForm.register("uri")}
+              type="url"
+              placeholder="https://example.com/token-metadata.json"
+              error={metadataUriForm.formState.errors.uri?.message}
+              disabled={adminDisabled}
+            />
+            <Button
+              type="submit"
+              className="w-full bg-white/5 border-white/10 hover:bg-white/10 text-white"
+              disabled={adminDisabled || loading === "metadata-uri"}
+              isLoading={loading === "metadata-uri"}
+            >
+              Update URI
+            </Button>
+          </form>
         </div>
       </div>
     </section>

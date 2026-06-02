@@ -28,6 +28,7 @@ export interface TokenInfo {
   admin: string;
   contractId: string;
   maxSupply?: string | null;
+  contractUri?: string;
 }
 
 export interface TokenHolder {
@@ -504,6 +505,14 @@ async function _fetchTokenInfo(
     // max_supply not implemented or not accessible
   }
 
+  let contractUri: string | undefined;
+  try {
+    const uriVal = await simulateCall(contractId, "contract_uri", config);
+    contractUri = decodeString(uriVal);
+  } catch {
+    // contract_uri not set or not accessible
+  }
+
   return {
     name: decodeString(nameVal),
     symbol: decodeString(symbolVal),
@@ -513,6 +522,7 @@ async function _fetchTokenInfo(
     admin: adminVal ? decodeAddress(adminVal) : "N/A",
     contractId,
     maxSupply,
+    contractUri,
   };
 }
 
