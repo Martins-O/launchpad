@@ -256,7 +256,7 @@ impl TokenContract {
         env.storage()
             .persistent()
             .set(&DataKey::Frozen(addr.clone()), &true);
-        env.events().publish((symbol_short!("freeze"), addr), true);
+        env.events().publish((symbol_short!("freeze"), addr), ());
     }
 
     /// Unfreeze a previously frozen account. Admin only.
@@ -265,7 +265,7 @@ impl TokenContract {
         env.storage()
             .persistent()
             .remove(&DataKey::Frozen(addr.clone()));
-        env.events().publish((symbol_short!("freeze"), addr), false);
+        env.events().publish((symbol_short!("unfreeze"), addr), ());
     }
 
     /// Pause the contract, halting all state-changing operations. Admin only.
@@ -1741,5 +1741,38 @@ mod test {
         // Supply a valid future expiration; the allowance should be stored correctly.
         client.approve(&admin, &spender, &500i128, &100u32);
         assert_eq!(client.allowance(&admin, &spender), 500i128);
+    }
+
+    #[test]
+    fn test_freeze_unfreeze_events() {
+        let (env, client, _admin, user) = setup();
+
+        client.freeze_account(&user);
+        let events = env.events().all();
+        let last_event = events.get(events.len() - 1).unwrap();
+        
+        // Verify freeze event
+        assert_eq!(
+            last_event,
+            (
+                client.address.clone(),
+                (symbol_short!("freeze"), user.clone()).into_val(&env),
+                ().into_val(&env)
+            )
+        );
+
+        client.unfreeze_account(&user);
+        let events = env.events().all();
+        let last_event = events.get(events.len() - 1).unwrap();
+        
+        // Verify unfreeze event
+        assert_eq!(
+            last_event,
+            (
+                client.address.clone(),
+                (symbol_short!("unfreeze"), user.clone()).into_val(&env),
+                ().into_val(&env)
+            )
+        );
     }
 }
