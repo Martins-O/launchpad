@@ -125,6 +125,14 @@ export default function TokenDashboard({ contractId }: { contractId: string }) {
             copyValue={tokenInfo.admin}
             isAddress={true}
           />
+          {tokenInfo.complianceNode && (
+            <InfoCard
+              label="Compliance Node"
+              value={truncateAddress(tokenInfo.complianceNode)}
+              copyValue={tokenInfo.complianceNode}
+              isAddress={true}
+            />
+          )}
         </div>
       </section>
 
