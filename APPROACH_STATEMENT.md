@@ -1,10 +1,12 @@
 # Approach Statement for Issue #216: Token Contract permit() Implementation
 
+
 ## Resolution Path: **Remove permit() Entirely (PATH B)**
 
 ### Justification
 
 After completing the mandatory codebase reconnaissance, I have determined that **removal** is the only safe and correct resolution path for the following reasons:
+
 
 #### 1. **Critical Technical Blocker**
 The Soroban SDK 21.0.0 does not provide a mechanism to extract the Ed25519 public key bytes from an `Address` type within a contract context. The `Address` type is opaque and does not expose methods like `to_public_key()` or similar. Without access to the public key, it is impossible to call `env.crypto().ed25519_verify(&public_key, &message, &signature)`.
@@ -13,6 +15,7 @@ The Soroban SDK 21.0.0 does not provide a mechanism to extract the Ed25519 publi
 - Reviewed Soroban SDK documentation and example contracts (simple-account, complex-account)
 - The example contracts receive public keys as explicit `BytesN<32>` parameters during initialization
 - No SDK method exists to derive public key bytes from an `Address` representing an account
+
 
 #### 2. **Current State is a Deception Vulnerability**
 The current `permit()` function:
