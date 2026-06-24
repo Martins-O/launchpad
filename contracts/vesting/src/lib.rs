@@ -375,8 +375,10 @@ impl VestingContract {
         env.storage().persistent().set(&key, &schedule);
 
         // Emit event with tuple payload
-        env.events()
-            .publish((symbol_short!("clf_ext"), recipient), (old_cliff, new_cliff));
+        env.events().publish(
+            (symbol_short!("clf_ext"), recipient),
+            (old_cliff, new_cliff),
+        );
     }
 
     // ── Read-only queries ───────────────────────────────────────────────
@@ -438,11 +440,7 @@ impl VestingContract {
     ///
     /// `start` — zero-based offset into the recipients list.
     /// `limit` — maximum number of recipients to return.
-    pub fn get_recipients_paginated(
-        env: Env,
-        start: u32,
-        limit: u32,
-    ) -> Vec<Address> {
+    pub fn get_recipients_paginated(env: Env, start: u32, limit: u32) -> Vec<Address> {
         let all_recipients = env
             .storage()
             .persistent()
@@ -608,7 +606,7 @@ impl VestingContract {
 #[cfg(test)]
 mod test {
     use super::*;
-    use soroban_sdk::{testutils::Address as _, testutils::Ledger, Env};
+    use soroban_sdk::{testutils::Address as _, testutils::Events as _, testutils::Ledger, Env};
 
     fn latest_index() -> Option<u32> {
         None
@@ -1045,13 +1043,18 @@ mod test {
 
         // Verify event emission contains (old_cliff, new_cliff)
         use soroban_sdk::IntoVal;
+        let events = env.events().all();
+        let last_event = events.slice(events.len() - 1..);
         assert_eq!(
-            env.events().all().last(),
-            Some((
-                contract_id,
-                (symbol_short!("clf_ext"), recipient).into_val(&env),
-                (100u32, 150u32).into_val(&env)
-            ))
+            last_event,
+            soroban_sdk::vec![
+                &env,
+                (
+                    contract_id,
+                    (symbol_short!("clf_ext"), recipient).into_val(&env),
+                    (100u32, 150u32).into_val(&env)
+                )
+            ]
         );
     }
 
